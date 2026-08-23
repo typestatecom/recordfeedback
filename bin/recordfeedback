@@ -37,6 +37,8 @@ die() {
   exit 1
 }
 
+DESKTOP_HINT='Open System Settings, Privacy and Security, Files and Folders, find the terminal application Claude Code runs in, and turn on Desktop Folder. Full Disk Access for the same application works too. macOS asks once and remembers a refusal.'
+
 MIC_HINT='the terminal application needs Microphone permission in System Settings, Privacy and Security, Microphone. macOS asks once, and if the prompt was refused the switch has to be turned on by hand.'
 
 # ------------------------------------------------------------------- plumbing
@@ -177,10 +179,12 @@ cmd_doctor() {
 
   local shots
   shots="$(shot_dir)"
-  if [ -d "$shots" ]; then
+  if [ ! -d "$shots" ]; then
+    check fail "screenshot folder" "$shots does not exist. Set RF_SHOT_DIR, or change the folder in the screenshot app."
+  elif ls "$shots" >/dev/null 2>&1; then
     check ok "screenshot folder" "$shots"
   else
-    check fail "screenshot folder" "$shots does not exist. Set RF_SHOT_DIR, or change the folder in the screenshot app."
+    check fail "screenshot folder" "$shots exists but macOS will not let this terminal read it, so no screenshot can ever be collected. $DESKTOP_HINT"
   fi
 
   local out="$RF_HOME/doctor-mic.wav"
@@ -226,6 +230,273 @@ cmd_doctor() {
   echo "Everything the tool needs is present."
 }
 
+# Microseconds of audio ffmpeg says it has recorded so far, or 0.
+recorded_us() {
+  local file="$1/ffmpeg.progress"
+  [ -f "$file" ] || { echo 0; return 0; }
+  local v
+  v="$(grep -a '^out_time_us=' "$file" 2>/dev/null | tail -n 1 | cut -d= -f2)"
+  case "$v" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$v" ;;
+  esac
+}
+
+# ---------------------------------------------------------------- the session
+
+new_session_dir() {
+  local stamp base dir
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  base="$RF_HOME/sessions"
+  dir="$base/$stamp"
+  # Two sessions in the same second is unlikely and still has to work.
+  local n=2
+  while [ -e "$dir" ]; do
+    dir="$base/$stamp-$n"
+    n=$((n + 1))
+  done
+  mkdir -p "$dir/shots"
+  printf '%s' "$dir"
+}
+
+write_meta() {
+  local session="$1" note="$2" device="$3" status="$4"
+  local branch
+  branch="$(git -C "$PWD" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  jq -n \
+    --arg started "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg started_local "$(date +%Y-%m-%dT%H:%M:%S%z)" \
+    --arg cwd "$PWD" \
+    --arg branch "$branch" \
+    --arg note "$note" \
+    --arg device "$device" \
+    --arg lang "$RF_LANG" \
+    --arg status "$status" \
+    '{started: $started, started_local: $started_local, cwd: $cwd, branch: $branch,
+      note: $note, device: $device, lang: $lang, status: $status}' \
+    > "$session/meta.json"
+}
+
+set_meta() {
+  local session="$1" key="$2" value="$3"
+  local tmp="$session/meta.json.tmp"
+  jq --arg v "$value" ".$key = \$v" "$session/meta.json" > "$tmp" && mv "$tmp" "$session/meta.json"
+}
+
+# Blocks until the pid is gone or the deadline passes. Tenths of a second.
+wait_for_exit() {
+  local pid="$1" tenths="$2" waited=0
+  while [ "$waited" -lt "$tenths" ]; do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
+# ffmpeg here ignores SIGINT and SIGTERM, and a SIGKILL leaves a zero byte
+# file because the audio is still in its output buffer. Its own q command is
+# the only shutdown that produces a playable recording.
+stop_recorder() {
+  local session="$1"
+  local pid
+  pid="$(read_pid "$session/ffmpeg.pid")" || return 0
+  pid_alive "$pid" || return 0
+
+  local ctl="$session/ffmpeg.ctl"
+  if [ -p "$ctl" ]; then
+    # Opening a FIFO for writing blocks when nothing holds the read end, so
+    # never let that block the whole stop.
+    run_with_timeout 5 bash -c 'printf q > "$1"' _ "$ctl" >/dev/null 2>&1 || true
+    wait_for_exit "$pid" 100 && return 0
+  fi
+
+  echo "recordfeedback: the recorder did not answer q, forcing it down." >&2
+  echo "  the audio may be lost, ffmpeg keeps it buffered until it exits cleanly." >&2
+  kill -TERM "$pid" 2>/dev/null || true
+  wait_for_exit "$pid" 30 && return 0
+  kill -KILL "$pid" 2>/dev/null || true
+  wait_for_exit "$pid" 20 || true
+  return 0
+}
+
+stop_overlay() {
+  local session="$1"
+  local pid
+  pid="$(read_pid "$session/overlay.pid")" || return 0
+  pid_alive "$pid" || return 0
+  kill -TERM "$pid" 2>/dev/null || true
+  wait_for_exit "$pid" 30 || kill -KILL "$pid" 2>/dev/null || true
+  return 0
+}
+
+# ----------------------------------------------------------------------- start
+
+cmd_start() {
+  local note="" no_overlay=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --note) note="${2:-}"; shift 2 ;;
+      --device) RF_DEVICE="${2:-}"; shift 2 ;;
+      --no-overlay) no_overlay=1; shift ;;
+      *) die "start: unknown option '$1'" "recordfeedback start [--note TEXT] [--device N] [--no-overlay]" ;;
+    esac
+  done
+
+  local live
+  if live="$(live_session)"; then
+    local ran
+    ran="$(format_mmss "$(elapsed_seconds "$live/start.ref")")"
+    die "a session is already running, started $ran ago
+  session: $live
+  stop it with: recordfeedback stop
+  throw it away with: recordfeedback abort"
+  fi
+  # A current symlink whose recorder is dead is stale and means nothing.
+  rm -f "$CURRENT"
+
+  mkdir -p "$RF_HOME/sessions"
+  local session
+  session="$(new_session_dir)"
+  touch "$session/start.ref"
+  write_meta "$session" "$note" "${RF_FFMPEG_INPUT:+synthetic}${RF_FFMPEG_INPUT:-$RF_DEVICE}" "recording"
+
+  local ctl="$session/ffmpeg.ctl"
+  mkfifo "$ctl"
+  local input
+  input="$(ffmpeg_input)"
+  # 0<> keeps a writer on the FIFO inside ffmpeg itself, so the FIFO never
+  # reaches end of file when this shell exits and q still arrives at stop.
+  # shellcheck disable=SC2086
+  nohup ffmpeg -hide_banner -loglevel warning \
+    -progress "$session/ffmpeg.progress" \
+    $input \
+    -ac 1 -ar 16000 -c:a pcm_s16le "$session/audio.wav" \
+    0<>"$ctl" >"$session/ffmpeg.log" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$session/ffmpeg.pid"
+  ln -sfn "$session" "$CURRENT"
+
+  # ffmpeg buffers the output file, so audio.wav is still empty seconds in.
+  # The progress stream is the first honest sign that audio is arriving.
+  local recorded=0 waited=0
+  while [ "$waited" -lt 50 ]; do
+    pid_alive "$pid" || break
+    recorded="$(recorded_us "$session")"
+    [ "$recorded" -gt 0 ] && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  if ! pid_alive "$pid" || [ "$recorded" -le 0 ]; then
+    kill -KILL "$pid" 2>/dev/null || true
+    echo "recordfeedback: the recorder produced no audio." >&2
+    echo "  command: ffmpeg $input -ac 1 -ar 16000 -c:a pcm_s16le $session/audio.wav" >&2
+    echo "  last lines of $session/ffmpeg.log:" >&2
+    tail -n 20 "$session/ffmpeg.log" 2>/dev/null | sed 's/^/    /' >&2
+    echo "  fix: $MIC_HINT" >&2
+    rm -f "$CURRENT"
+    rm -rf "$session"
+    exit 1
+  fi
+
+  if [ "$no_overlay" -eq 0 ] && [ -x "$OVERLAY_BIN" ]; then
+    RF_SESSION="$session" nohup "$OVERLAY_BIN" >"$session/overlay.log" 2>&1 &
+    echo "$!" > "$session/overlay.pid"
+  fi
+
+  echo "Recording. Talk, and draw on the screen with the hotkeys below."
+  if [ "$no_overlay" -eq 0 ] && [ -x "$OVERLAY_BIN" ]; then
+    echo "  opt-cmd-D draw, opt-cmd-Z undo, opt-cmd-C clear, opt-cmd-H hide, opt-cmd-S stop"
+    echo "  shift-cmd-4 takes a screenshot with your marks in it"
+  else
+    echo "  no overlay, so no annotations. shift-cmd-4 still takes screenshots."
+  fi
+  echo "  session: $session"
+}
+
+# ---------------------------------------------------------------------- status
+
+cmd_status() {
+  local session
+  if ! session="$(live_session)"; then
+    if [ -L "$CURRENT" ]; then
+      echo "No session is running. A stale current symlink points at $(readlink "$CURRENT")."
+    else
+      echo "No session is running."
+    fi
+    return 0
+  fi
+  local secs shots recorded
+  secs="$(elapsed_seconds "$session/start.ref")"
+  shots="$(count_new_shots "$session")"
+  recorded="$(recorded_us "$session")"
+  echo "Recording for $(format_mmss "$secs")."
+  echo "  session: $session"
+  echo "  audio:   $(format_mmss $((recorded / 1000000))) captured"
+  echo "  shots:   $shots so far in $(shot_dir)"
+  local note
+  note="$(jq -r '.note // ""' "$session/meta.json")"
+  [ -n "$note" ] && echo "  note:    $note"
+  return 0
+}
+
+# Screenshots taken since the session started. Used by status, which has no
+# stop.ref yet, so it counts everything newer than start.ref.
+count_new_shots() {
+  local session="$1"
+  local dir
+  dir="$(shot_dir)"
+  [ -d "$dir" ] || { echo 0; return 0; }
+  { find "$dir" -maxdepth 1 -type f -newer "$session/start.ref" \
+      \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.tiff' -o -iname '*.heic' \) \
+      ! -name '.*' 2>/dev/null || true; } | wc -l | tr -d ' '
+}
+
+# ----------------------------------------------------------------------- abort
+
+cmd_abort() {
+  local session
+  if ! session="$(live_session)"; then
+    if [ -L "$CURRENT" ]; then
+      session="$(readlink "$CURRENT")"
+    else
+      echo "No session is running."
+      return 0
+    fi
+  fi
+  touch "$session/stop.ref"
+  stop_recorder "$session"
+  stop_overlay "$session"
+  rm -f "$session/ffmpeg.ctl"
+  set_meta "$session" status aborted
+  rm -f "$CURRENT"
+  echo "Aborted. Nothing was transcribed."
+  echo "  session: $session"
+}
+
+# ---------------------------------------------------------------------- devices
+
+cmd_devices() {
+  echo "avfoundation audio inputs. Pass the index to start --device, or set RF_DEVICE."
+  ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 \
+    | sed -n '/AVFoundation audio devices/,$p' \
+    | grep -E '^\[' \
+    | sed 's/^\[AVFoundation indev @ [^]]*\] //' \
+    | grep -E '^\[[0-9]+\]' || echo "  none found"
+}
+
+# ------------------------------------------------------------------------ last
+
+cmd_last() {
+  local newest=""
+  for dir in "$RF_HOME"/sessions/*/; do
+    [ -f "$dir/feedback.md" ] || continue
+    newest="$dir"
+  done
+  [ -n "$newest" ] || die "no session has a feedback.md yet" "" "record one with: recordfeedback start"
+  echo "${newest%/}/feedback.md"
+}
+
 # ----------------------------------------------------------------------- usage
 
 usage() {
@@ -251,6 +522,11 @@ main() {
   local cmd="${1:-help}"
   [ $# -gt 0 ] && shift || true
   case "$cmd" in
+    start) cmd_start "$@" ;;
+    status) cmd_status "$@" ;;
+    abort) cmd_abort "$@" ;;
+    devices) cmd_devices "$@" ;;
+    last) cmd_last "$@" ;;
     doctor) cmd_doctor "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; die "unknown command '$cmd'" ;;

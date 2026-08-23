@@ -33,6 +33,7 @@ Do not re-derive these. They were checked on 2026-08-24.
 | `uv`, `jq`, `python3` | all present under `/opt/homebrew/bin` |
 | avfoundation audio inputs | `[0] MacBook Pro Microphone`, `[1] CASTER Stream Mix 1`, `[2] Microsoft Teams Audio`, `[3] CASTER` |
 | Screenshot folder | `~/Desktop` (`defaults read com.apple.screencapture location` is unset) |
+| Desktop access | **Not granted.** `ls ~/Desktop` fails with `Operation not permitted`. The terminal application needs Files and Folders, Desktop Folder, or Full Disk Access, or no screenshot can ever be collected. `doctor` checks this by listing the folder, because `-d` succeeds on a folder macOS will not let it read. |
 | `~/.claude/commands/` | exists, empty. No global slash command competes with this one. |
 
 `whisper-cli` writes ggml and Metal loader lines to stderr before any
@@ -91,19 +92,28 @@ session you want back a week later is worth more than the megabytes.
    ffmpeg is alive. Print the session path and how long it has run.
    A stale `current` whose pid is dead is cleaned up and start proceeds.
 2. Create the session directory, `touch start.ref`, write `meta.json`.
-3. Start the recorder detached:
+3. Start the recorder detached, with a control FIFO as its stdin:
 
    ```
-   nohup ffmpeg -nostdin -hide_banner -loglevel warning \
+   mkfifo "$SESSION/ffmpeg.ctl"
+   nohup ffmpeg -hide_banner -loglevel warning \
+     -progress "$SESSION/ffmpeg.progress" \
      -f avfoundation -i ":$DEVICE" \
      -ac 1 -ar 16000 -c:a pcm_s16le "$SESSION/audio.wav" \
-     >"$SESSION/ffmpeg.log" 2>&1 &
+     0<>"$SESSION/ffmpeg.ctl" >"$SESSION/ffmpeg.log" 2>&1 &
    ```
 
-   `-nostdin` matters. Without it ffmpeg competes for the terminal and
-   stops the moment it is backgrounded.
-4. Wait one second, then prove the recorder is real: the pid is alive
-   and `audio.wav` is larger than the 44 byte header. If either fails,
+   The FIFO is how the recording is stopped, and it replaces `-nostdin`.
+   ffmpeg still never touches the terminal, because its stdin is the
+   FIFO. `0<>` opens the FIFO read-write so ffmpeg holds a writer on it
+   itself, which means the FIFO never reaches end of file when this
+   shell exits and `q` still arrives at stop time.
+4. Prove the recorder is real by reading `out_time_us` from
+   `ffmpeg.progress` until it is greater than zero, for up to 5 seconds.
+   Do not check the size of `audio.wav`. ffmpeg holds the audio in its
+   output buffer and the file is still zero bytes several seconds in, so
+   file size proves nothing. The progress stream is the first honest
+   sign that audio is arriving. If the pid dies or no audio arrives,
    print the last 20 lines of `ffmpeg.log` and the microphone hint
    below, remove the session, and exit non-zero.
 5. Start `bin/rf-overlay` detached unless `--no-overlay`, store its pid.
@@ -128,9 +138,16 @@ Idempotent. Works whether the recorder is still running or the stop
 hotkey already halted it.
 
 1. `touch stop.ref`.
-2. `kill -INT` the ffmpeg pid, wait up to 10 seconds for it to write the
-   WAV trailer, then `kill -TERM`, then `kill -KILL`. A WAV whose header
-   was never finalised still transcribes, but say so in the output.
+2. Write `q` to `$SESSION/ffmpeg.ctl` and wait up to 10 seconds. This is
+   ffmpeg's own quit command and it is the only shutdown that produces a
+   playable file. Measured on this machine: an `-f avfoundation` recorder
+   ignores SIGINT and SIGTERM and is still running ten seconds later, and
+   a SIGKILL leaves a zero byte file, because ffmpeg keeps the audio
+   buffered until it exits cleanly. Neither `-flush_packets 1` nor
+   writing raw PCM changes that. `kill -TERM` and then `kill -KILL`
+   remain only as a fallback for a wedged recorder, and stop says out
+   loud that the audio is probably lost when it gets that far, because
+   nothing can be recovered from a zero byte file.
 3. `kill -TERM` the overlay.
 4. Collect screenshots. Files in the screenshot folder, depth 1, with an
    image extension, not starting with a dot, newer than `start.ref` and
@@ -372,8 +389,15 @@ The cases that must exist:
 
 1. `doctor` reports every dependency present.
 2. A session started with `RF_FFMPEG_INPUT` set to a synthetic source
-   produces a WAV whose duration, read with `ffprobe`, is within half a
-   second of the wall clock time between start and stop.
+   records in real time. Sample `out_time_us` from `ffmpeg.progress`
+   twice and assert the recorded audio advances one second per second of
+   wall clock to within 2 percent, and that the finished WAV covers the
+   session window to within one second. The rate is the property that
+   matters. Both the real input and the synthetic one carry a fixed
+   startup offset of about half a second, measured at -0.574 seconds for
+   the microphone and +0.595 for the synthetic source, which says
+   nothing about drift, so an absolute half second tolerance on the
+   window would fail on a recorder that is working perfectly.
 3. Speech in, words out. Build the fixture with the macOS speech
    synthesiser, which needs no person and no microphone:
 

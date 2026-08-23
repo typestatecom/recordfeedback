@@ -36,3 +36,31 @@ tests, so no test ever opens the real microphone.
 `run_with_timeout` backgrounds the command and polls at 100 ms. Every
 external call in this tool can block on a permission prompt that never
 returns, and a blocked `doctor` teaches the user nothing.
+
+## 2026-08-24 The recorder is stopped by writing q, not by a signal
+
+Measured on this machine with ffmpeg 7.1.1: an `-f avfoundation` recorder
+ignores both SIGINT and SIGTERM and is still running ten seconds later,
+and a SIGKILL leaves a zero byte file, because ffmpeg holds the audio in
+its output buffer until it flushes. `-flush_packets 1` does not change
+that, and neither does writing raw PCM instead of a WAV. The signal
+sequence the spec first described would have destroyed every recording it
+was meant to end.
+
+ffmpeg's own keyboard command `q` exits cleanly in about 0.35 seconds and
+writes a correct header. So the recorder gets a FIFO at
+`$SESSION/ffmpeg.ctl` as stdin, opened read-write with `0<>` so the FIFO
+never reaches end of file when the launching shell exits, and `stop`
+writes `q` to it. This replaces `-nostdin`, and it solves the same
+problem: ffmpeg still never touches the terminal.
+
+TERM and KILL remain as a fallback for a wedged recorder, and `stop` says
+out loud that the audio is probably lost when it gets that far, because
+nothing can be recovered from a zero byte file.
+
+## 2026-08-24 The synthetic test source is -re lavfi sine
+
+`RF_FFMPEG_INPUT="-re -f lavfi -i sine=..."` records in real time and
+answers `q` on the same control FIFO as the real input, so the tests
+exercise the production shutdown path rather than a special case. Without
+`-re` the source generates hours of audio in a second and proves nothing.
