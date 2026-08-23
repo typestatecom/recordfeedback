@@ -64,3 +64,16 @@ nothing can be recovered from a zero byte file.
 answers `q` on the same control FIFO as the real input, so the tests
 exercise the production shutdown path rather than a special case. Without
 `-re` the source generates hours of audio in a second and proves nothing.
+
+## 2026-08-24 The quantised turbo model is accurate enough, and fast
+
+`ggml-large-v3-turbo-q5_0.bin` transcribed the fixture word for word and
+segmented three spoken sentences into six segments with clean millisecond
+offsets, in about two seconds for twelve seconds of audio. The full
+large-v3-turbo was the fallback if quality was poor. It is not needed.
+
+## 2026-08-24 transcribe is its own subcommand
+
+`stop` calls it, and so can a person whose `stop` died after the WAV was
+written. It takes a session directory, which is also what lets the test
+drive it against a `say` fixture without recording anything.

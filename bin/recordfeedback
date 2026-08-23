@@ -497,6 +497,52 @@ cmd_last() {
   echo "${newest%/}/feedback.md"
 }
 
+# ------------------------------------------------------------------ transcribe
+
+# whisper-cli writes ggml and Metal loader lines to stderr before any result,
+# and the first run of a process loads the embedded Metal library, which took
+# 14 seconds when this was measured. Treat stderr as noise, keep it in a log,
+# and read only the JSON file.
+cmd_transcribe() {
+  local session="${1:-}"
+  if [ -z "$session" ]; then
+    session="$(live_session || true)"
+    [ -n "$session" ] || die "transcribe: no session given and none is running" \
+      "recordfeedback transcribe <session directory>"
+  fi
+  [ -d "$session" ] || die "transcribe: no such session directory" "" "check the path: $session"
+  [ -f "$session/audio.wav" ] || die "transcribe: $session has no audio.wav" "" \
+    "the recorder never wrote one, look at $session/ffmpeg.log"
+  [ -f "$RF_MODEL" ] || die "transcribe: the whisper model is missing" "" \
+    "expected $RF_MODEL. Download a ggml model there, or set RF_MODEL."
+
+  local status=0
+  whisper-cli -m "$RF_MODEL" -f "$session/audio.wav" -l "$RF_LANG" \
+    -oj -otxt -of "$session/transcript" -np -t 8 \
+    >"$session/whisper.log" 2>&1 || status=$?
+
+  if [ ! -f "$session/transcript.json" ]; then
+    echo "recordfeedback: whisper-cli wrote no transcript.json" >&2
+    echo "  command: whisper-cli -m $RF_MODEL -f $session/audio.wav -l $RF_LANG -oj -otxt -of $session/transcript -np -t 8" >&2
+    echo "  last lines of $session/whisper.log:" >&2
+    tail -n 20 "$session/whisper.log" 2>/dev/null | sed 's/^/    /' >&2
+    echo "  fix: check the model file and that audio.wav is 16 kHz mono PCM." >&2
+    return 1
+  fi
+  # A silent recording is a valid result, not a failure, so only a missing
+  # file counts as one.
+  [ -f "$session/transcript.txt" ] || : > "$session/transcript.txt"
+  return 0
+}
+
+# Words spoken, or nothing. Used to tell a silent session from a real one.
+transcript_words() {
+  local session="$1"
+  [ -f "$session/transcript.json" ] || { echo 0; return 0; }
+  jq -r '[.transcription[]?.text] | join(" ")' "$session/transcript.json" 2>/dev/null \
+    | tr -s '[:space:]' '\n' | grep -c '[[:alnum:]]' || echo 0
+}
+
 # ----------------------------------------------------------------------- usage
 
 usage() {
@@ -527,6 +573,7 @@ main() {
     abort) cmd_abort "$@" ;;
     devices) cmd_devices "$@" ;;
     last) cmd_last "$@" ;;
+    transcribe) cmd_transcribe "$@" ;;
     doctor) cmd_doctor "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; die "unknown command '$cmd'" ;;
