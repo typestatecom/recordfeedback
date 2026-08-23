@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# recordfeedback: record spoken feedback with screen annotations, then hand
+# Claude Code one document that joins the words to the pictures.
+set -euo pipefail
+
+RF_HOME="${RF_HOME:-$HOME/.recordfeedback}"
+RF_MODEL="${RF_MODEL:-$RF_HOME/models/ggml-large-v3-turbo-q5_0.bin}"
+RF_LANG="${RF_LANG:-auto}"
+RF_DEVICE="${RF_DEVICE:-0}"
+
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+# Follow the install symlink so the overlay binary is found next to the real
+# script and not next to ~/.local/bin/rfb.
+while [ -L "$SELF" ]; do
+  link="$(readlink "$SELF")"
+  case "$link" in
+    /*) SELF="$link" ;;
+    *) SELF="$(cd "$(dirname "$SELF")" && pwd)/$link" ;;
+  esac
+done
+BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+REPO_DIR="$(cd "$BIN_DIR/.." && pwd)"
+OVERLAY_BIN="$BIN_DIR/rf-overlay"
+
+CURRENT="$RF_HOME/current"
+
+# ---------------------------------------------------------------- diagnostics
+
+# A failure prints what failed, the command behind it and the way out, because
+# this tool runs while the user is talking to their computer and is not
+# watching a terminal.
+die() {
+  local what="$1" cmd="${2:-}" fix="${3:-}"
+  echo "recordfeedback: $what" >&2
+  [ -n "$cmd" ] && echo "  command: $cmd" >&2
+  [ -n "$fix" ] && echo "  fix: $fix" >&2
+  exit 1
+}
+
+MIC_HINT='the terminal application needs Microphone permission in System Settings, Privacy and Security, Microphone. macOS asks once, and if the prompt was refused the switch has to be turned on by hand.'
+
+# ------------------------------------------------------------------- plumbing
+
+# macOS ships no timeout(1), and every external call here can hang on a
+# permission prompt that never comes back.
+run_with_timeout() {
+  local secs="$1"
+  shift
+  "$@" &
+  local pid=$!
+  local ticks=0
+  local limit=$((secs * 10))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$ticks" -ge "$limit" ]; then
+      kill -TERM "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      return 124
+    fi
+    sleep 0.1
+    ticks=$((ticks + 1))
+  done
+  local status=0
+  wait "$pid" || status=$?
+  return "$status"
+}
+
+expand_tilde() {
+  case "$1" in
+    "~") echo "$HOME" ;;
+    "~/"*) echo "$HOME/${1#\~/}" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+shot_dir() {
+  if [ -n "${RF_SHOT_DIR:-}" ]; then
+    expand_tilde "$RF_SHOT_DIR"
+    return
+  fi
+  local configured
+  configured="$(defaults read com.apple.screencapture location 2>/dev/null || true)"
+  if [ -n "$configured" ]; then
+    expand_tilde "$configured"
+  else
+    echo "$HOME/Desktop"
+  fi
+}
+
+# The audio source. Tests replace the whole avfoundation input so the pipeline
+# runs without a microphone and without a person.
+ffmpeg_input() {
+  if [ -n "${RF_FFMPEG_INPUT:-}" ]; then
+    printf '%s' "$RF_FFMPEG_INPUT"
+  else
+    printf '%s' "-f avfoundation -i :$RF_DEVICE"
+  fi
+}
+
+pid_alive() {
+  [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
+}
+
+read_pid() {
+  local file="$1"
+  [ -f "$file" ] || return 1
+  local pid
+  pid="$(cat "$file" 2>/dev/null || true)"
+  [ -n "$pid" ] || return 1
+  printf '%s' "$pid"
+}
+
+# The live session, or nothing. A current symlink whose recorder is dead is
+# stale and never blocks a new session.
+live_session() {
+  [ -L "$CURRENT" ] || return 1
+  local dir
+  dir="$(readlink "$CURRENT")"
+  [ -d "$dir" ] || return 1
+  local pid
+  pid="$(read_pid "$dir/ffmpeg.pid")" || return 1
+  pid_alive "$pid" || return 1
+  printf '%s' "$dir"
+}
+
+elapsed_seconds() {
+  local ref="$1"
+  local start now
+  start="$(stat -f %m "$ref")"
+  now="$(date +%s)"
+  echo $((now - start))
+}
+
+format_mmss() {
+  local total="$1"
+  printf '%02d:%02d' $((total / 60)) $((total % 60))
+}
+
+# ---------------------------------------------------------------------- doctor
+
+DOCTOR_FAILED=0
+
+check() {
+  local status="$1" name="$2" detail="$3"
+  printf '%-4s %-18s %s\n' "$status" "$name" "$detail"
+  [ "$status" = "fail" ] && DOCTOR_FAILED=1
+  return 0
+}
+
+check_binary() {
+  local name="$1" hint="$2"
+  local path
+  path="$(command -v "$name" 2>/dev/null || true)"
+  if [ -n "$path" ]; then
+    check ok "$name" "$path"
+  else
+    check fail "$name" "not found. $hint"
+  fi
+}
+
+cmd_doctor() {
+  check_binary ffmpeg "install it with: brew install ffmpeg"
+  check_binary ffprobe "install it with: brew install ffmpeg"
+  check_binary fswatch "install it with: brew install fswatch"
+  check_binary whisper-cli "install it with: brew install whisper-cpp"
+  check_binary swiftc "install the Xcode command line tools with: xcode-select --install"
+  check_binary jq "install it with: brew install jq"
+  check_binary python3 "install it with: brew install python"
+  check_binary screencapture "part of macOS, expected at /usr/sbin/screencapture"
+
+  if [ -f "$RF_MODEL" ]; then
+    local size
+    size="$(du -h "$RF_MODEL" | cut -f1 | tr -d ' ')"
+    check ok "whisper model" "$RF_MODEL ($size)"
+  else
+    check fail "whisper model" "$RF_MODEL is missing. Download a ggml model into $RF_HOME/models, or point RF_MODEL at one."
+  fi
+
+  local shots
+  shots="$(shot_dir)"
+  if [ -d "$shots" ]; then
+    check ok "screenshot folder" "$shots"
+  else
+    check fail "screenshot folder" "$shots does not exist. Set RF_SHOT_DIR, or change the folder in the screenshot app."
+  fi
+
+  local out="$RF_HOME/doctor-mic.wav"
+  mkdir -p "$RF_HOME"
+  rm -f "$out"
+  local input status=0
+  input="$(ffmpeg_input)"
+  # Half a second of real capture is the only honest test of the permission.
+  # shellcheck disable=SC2086
+  run_with_timeout 20 ffmpeg -nostdin -hide_banner -loglevel error -y \
+    $input -t 0.5 -ac 1 -ar 16000 -c:a pcm_s16le "$out" >/dev/null 2>&1 || status=$?
+  local bytes=0
+  [ -f "$out" ] && bytes="$(stat -f %z "$out")"
+  if [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ]; then
+    check ok "microphone" "captured $bytes bytes from ${RF_FFMPEG_INPUT:-avfoundation input $RF_DEVICE}"
+  elif [ "$status" -eq 124 ]; then
+    check fail "microphone" "ffmpeg did not return within 20 seconds. A permission prompt may be waiting on screen. $MIC_HINT"
+  else
+    check fail "microphone" "captured no audio. $MIC_HINT"
+  fi
+  rm -f "$out"
+
+  if [ -x "$OVERLAY_BIN" ]; then
+    check ok "overlay" "$OVERLAY_BIN"
+  else
+    check warn "overlay" "not built. Run $REPO_DIR/overlay/build.sh. Recording works without it, annotations do not."
+  fi
+
+  local uv_path
+  uv_path="$(command -v uv 2>/dev/null || true)"
+  if [ -n "$uv_path" ]; then
+    check ok "uv" "$uv_path"
+  else
+    check warn "uv" "not found. Only the overlay pixel test needs it."
+  fi
+
+  if [ "$DOCTOR_FAILED" -eq 1 ]; then
+    echo
+    echo "Some checks failed. The lines above say what to do about each one."
+    return 1
+  fi
+  echo
+  echo "Everything the tool needs is present."
+}
+
+# ----------------------------------------------------------------------- usage
+
+usage() {
+  cat <<'USAGE'
+recordfeedback <command>
+
+  start [--note TEXT] [--device N] [--no-overlay]
+                  begin a session: record audio and arm the overlay
+  wait [--timeout SECONDS]
+                  block until the stop hotkey, the recorder dying, or a timeout
+  stop            end the session, collect screenshots, transcribe, write feedback.md
+  status          the live session, how long it has run, what it has captured
+  abort           stop everything and throw the session away
+  last            path of the newest session that has a feedback.md
+  devices         the avfoundation audio inputs and their indexes
+  doctor          check every dependency, the model, the microphone and the overlay
+USAGE
+}
+
+# -------------------------------------------------------------------- dispatch
+
+main() {
+  local cmd="${1:-help}"
+  [ $# -gt 0 ] && shift || true
+  case "$cmd" in
+    doctor) cmd_doctor "$@" ;;
+    help|-h|--help) usage ;;
+    *) usage >&2; die "unknown command '$cmd'" ;;
+  esac
+}
+
+main "$@"
