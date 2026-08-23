@@ -77,3 +77,17 @@ large-v3-turbo was the fallback if quality was poor. It is not needed.
 `stop` calls it, and so can a person whose `stop` died after the WAV was
 written. It takes a session directory, which is also what lets the test
 drive it against a `say` fixture without recording anything.
+
+## 2026-08-24 Session screenshots leave the screenshot folder
+
+A screenshot taken during a session belongs to that session, so `collect`
+moves it into the archive instead of copying it, and the desktop is left
+as it was. `RF_KEEP_SHOTS=1` restores the old behaviour for anyone who
+wants both. This inverts `RF_MOVE_SHOTS` from the spec, which defaulted
+to copying and left every session's shots piled on the desktop.
+
+The overlay captures straight into `$SESSION/inbox` and never goes near
+the screenshot folder at all, so those shots are collected whatever their
+timestamp and there is nothing to clean up. That also means a session
+driven from the overlay needs no access to `~/Desktop`, which matters
+because macOS denies it by default.

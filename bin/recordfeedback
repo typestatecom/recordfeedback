@@ -497,6 +497,83 @@ cmd_last() {
   echo "${newest%/}/feedback.md"
 }
 
+# --------------------------------------------------------------- screenshots
+
+# Screenshots taken during a session belong to the session, not to the pile on
+# the desktop, so they are moved out of the screenshot folder and into the
+# archive. RF_KEEP_SHOTS=1 leaves the originals where they were.
+cmd_collect() {
+  local session="${1:-}"
+  if [ -z "$session" ]; then
+    session="$(live_session || true)"
+    [ -n "$session" ] || die "collect: no session given and none is running" \
+      "recordfeedback collect <session directory>"
+  fi
+  [ -d "$session" ] || die "collect: no such session directory" "" "check the path: $session"
+  [ -f "$session/start.ref" ] || die "collect: $session has no start.ref" "" \
+    "the session never started, there is nothing to collect"
+  [ -f "$session/stop.ref" ] || touch "$session/stop.ref"
+  mkdir -p "$session/shots" "$session/inbox"
+
+  local dir
+  dir="$(shot_dir)"
+
+  # The overlay captures straight into the session inbox and never touches the
+  # screenshot folder. Those shots are always ours, whatever their timestamp.
+  local listing="$session/.shot-list"
+  : > "$listing"
+  { find "$session/inbox" -maxdepth 1 -type f \
+      \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.tiff' -o -iname '*.heic' \) \
+      ! -name '.*' 2>/dev/null || true; } | while IFS= read -r f; do
+    [ -n "$f" ] && printf '%s\toverlay\t%s\n' "$(stat -f %Fm "$f")" "$f" >> "$listing"
+  done
+
+  # find prints an error and exits non-zero when macOS denies the folder, and
+  # a session with no screenshots at all is a normal session.
+  if [ -d "$dir" ]; then
+    { find "$dir" -maxdepth 1 -type f \
+        -newer "$session/start.ref" ! -newer "$session/stop.ref" \
+        \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.tiff' -o -iname '*.heic' \) \
+        ! -name '.*' 2>/dev/null || true; } | while IFS= read -r f; do
+      [ -n "$f" ] && printf '%s\tfolder\t%s\n' "$(stat -f %Fm "$f")" "$f" >> "$listing"
+    done
+  fi
+
+  local start_epoch
+  start_epoch="$(stat -f %Fm "$session/start.ref")"
+
+  # sort -n on the modification time is the order the shots were taken, which
+  # is the order they are numbered in and the order the document reads in.
+  local index=0
+  : > "$session/.shot-records"
+  while IFS=$'\t' read -r mtime source file; do
+    [ -n "${file:-}" ] || continue
+    index=$((index + 1))
+    local ext base offset_ms elapsed name target
+    ext="$(printf '%s' "${file##*.}" | tr '[:upper:]' '[:lower:]')"
+    offset_ms="$(python3 -c "print(max(0, int(round(($mtime - $start_epoch) * 1000))))")"
+    elapsed="$(format_mmss $((offset_ms / 1000)))"
+    name="$(printf '%02d-%02d%02d.%s' "$index" $((offset_ms / 60000)) $(((offset_ms / 1000) % 60)) "$ext")"
+    target="$session/shots/$name"
+    if [ "$source" = overlay ] || [ -n "${RF_KEEP_SHOTS:-}" ]; then
+      cp -p "$file" "$target"
+      [ "$source" = overlay ] && rm -f "$file"
+    else
+      mv "$file" "$target"
+    fi
+    jq -n --argjson index "$index" --arg file "$name" --arg path "$target" \
+      --argjson offset_ms "$offset_ms" --arg elapsed "$elapsed" --arg source "$source" \
+      --arg taken_at "$(date -r "${mtime%.*}" -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{index: $index, file: $file, path: $path, offset_ms: $offset_ms,
+        elapsed: $elapsed, taken_at: $taken_at, source: $source}' >> "$session/.shot-records"
+  done < <(sort -n "$listing")
+
+  jq -s '.' "$session/.shot-records" > "$session/shots.json"
+  rm -f "$listing" "$session/.shot-records"
+  rmdir "$session/inbox" 2>/dev/null || true
+  echo "$index"
+}
+
 # ------------------------------------------------------------------ transcribe
 
 # whisper-cli writes ggml and Metal loader lines to stderr before any result,
@@ -573,6 +650,7 @@ main() {
     abort) cmd_abort "$@" ;;
     devices) cmd_devices "$@" ;;
     last) cmd_last "$@" ;;
+    collect) cmd_collect "$@" ;;
     transcribe) cmd_transcribe "$@" ;;
     doctor) cmd_doctor "$@" ;;
     help|-h|--help) usage ;;

@@ -153,8 +153,11 @@ hotkey already halted it.
    image extension, not starting with a dot, newer than `start.ref` and
    not newer than `stop.ref`. Sort by modification time. Copy each to
    `shots/NN-MMSS.ext` where `NN` is the index from 01 and `MMSS` is the
-   elapsed time from the session start. Write `shots.json`. Copy, never
-   move, unless `RF_MOVE_SHOTS=1`.
+   elapsed time from the session start. Write `shots.json`. Move, never
+   copy, unless `RF_KEEP_SHOTS=1`, so a session's screenshots live in its
+   archive and not on the desktop. Shots the overlay captured straight
+   into `$SESSION/inbox` are collected whatever their timestamp, because
+   they never went near the screenshot folder.
 5. Transcribe:
 
    ```
@@ -372,7 +375,7 @@ Environment variables, all with working defaults:
 | `RF_LANG` | `auto` | language passed to `-l` |
 | `RF_DEVICE` | `0` | avfoundation audio input index |
 | `RF_SHOT_DIR` | `defaults read com.apple.screencapture location`, else `~/Desktop` | where to look for screenshots |
-| `RF_MOVE_SHOTS` | unset | move screenshots instead of copying |
+| `RF_KEEP_SHOTS` | unset | leave the originals in the screenshot folder instead of moving them |
 | `RF_FFMPEG_INPUT` | unset | replaces the whole avfoundation input, for tests |
 
 `RF_FFMPEG_INPUT` is what makes the pipeline testable without a
