@@ -36,9 +36,8 @@ guessed again.
 
 - No em-dashes anywhere: code, comments, documents, commit messages,
   chat.
-- Commit messages never mention Claude, Anthropic or AI assistance, and
-  carry no Co-Authored-By trailer. One commit per task, `git add` the
-  paths you changed and not `-A`, and the tree works at every commit.
+- One commit per task, `git add` the paths you changed and not `-A`, and
+  the tree works at every commit.
 - A comment says why, never what, and never the story. No date, no
   account of what the code used to do, no name of who found a bug. State
   the reason the code is the way it is and the failure the other way
