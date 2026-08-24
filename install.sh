@@ -30,13 +30,17 @@ esac
 # Without the overlay there is no palette and no stop key, and a person who
 # installed the tool has no way to know that from the outside.
 echo
-if "$REPO/overlay/build.sh" > /tmp/rf-overlay-build.log 2>&1; then
+# mktemp rather than a fixed name in /tmp: the log is world readable there and
+# two accounts installing on one machine would write to each other's file.
+build_log="$(mktemp -t rf-overlay-build)"
+trap 'rm -f "$build_log"' EXIT
+if "$REPO/overlay/build.sh" > "$build_log" 2>&1; then
   echo "  $REPO/bin/rf-overlay"
 else
   echo "The overlay did not build, so there are no annotations, no palette and"
   echo "no stop key. Everything else works."
   echo "  command: $REPO/overlay/build.sh"
-  sed 's/^/    /' /tmp/rf-overlay-build.log
+  sed 's/^/    /' "$build_log"
 fi
 
 echo
