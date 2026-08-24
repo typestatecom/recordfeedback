@@ -209,7 +209,6 @@ crops the palette from the frame the overlay reports rather than by eye.
 - `SPEC.md` is the contract and holds the facts already checked.
 - `CLAUDE.md` is how to work in this repository.
 - `docs/decisions.md` is the engineering calls worth keeping.
-- `docs/prior-art.md` is what else does this job.
 
 ## Licence
 
