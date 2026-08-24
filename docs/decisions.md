@@ -507,3 +507,25 @@ prints all three, so a genuine drift can be told apart from a noisy machine
 without rerunning anything.
 
 What it costs: the case takes fourteen seconds instead of eight.
+
+## 2026-08-24 Shot names are reserved at the key press, not counted off the folder
+
+`capture` takes its number from a counter that only moves forward, seeded
+from the folder with `max(reserved, countShots())` so an overlay rescued
+mid-session continues the numbering rather than restarting it. Counting
+the folder at write time was correct only while no second press arrived
+inside the second screencapture takes, and the second press is exactly
+what a silent capture invites. The cost is one more piece of state that
+has to be seeded correctly on rescue.
+
+## 2026-08-24 Probes sample the state the assertion is about, at the moment it is about
+
+`probeCapture` records draw mode when the capture is asked for rather
+than when the report is written three seconds later. Draw mode takes the
+foreground, so every key pressed at any other window in those three
+seconds arrives in the overlay, and `esc` or the letter of the chosen
+tool leaves draw mode. Reading late made the case fail about one run in
+ten, only ever while somebody was at the keyboard, and the failure named
+a screenshot that had in fact been taken. The cost is that the probe no
+longer says anything about draw mode after the capture, which no case
+asks about.
