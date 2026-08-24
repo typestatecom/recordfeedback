@@ -211,3 +211,75 @@ granted without a person, so no test can post a real click, and
 `11-palette-reachable` asks `NSWindow.windowNumber(at:)` the question a
 click asks instead. That covers which window is in front and not the
 delivery of the event to the button.
+
+## 2026-08-24 A tool that is already on is the way out of draw mode
+
+Watching a first session: the user clicked P, drew, and then said they
+could not stop drawing. They tried `⌥⌘D`, which is the Dock. `esc` does
+leave draw mode and always did, but nothing on screen said so, and the
+hotkey list had scrolled away in the terminal behind the overlay. The
+control they had in front of them was the tool button they had just
+pressed, and pressing it again did nothing.
+
+Selecting the tool that is already selected now leaves draw mode, and a
+Done button appears in the palette for the length of draw mode. `esc`
+stays. Three ways out, one of which is under the cursor already.
+
+What it costs: two quick presses of the same tool key drop out of draw
+mode instead of being ignored. That is the same gesture as a toggle
+everywhere else, and the alternative was a mode with no visible exit
+while the overlay holds every click on the screen.
+
+## 2026-08-24 The tool buttons draw their marks, not their letters
+
+The same session: `P A R H T` in a row was read as a word rather than as
+five buttons, and every tool had to be pressed to find out what it was.
+`T` was the one that stayed unclear even after trying it, because a
+letter among letters does not say text.
+
+Each button now draws what its tool draws: a nib, an arrow, a rectangle
+outline, a fat translucent bar. Text keeps a serif `T`, which is already
+the icon for text everywhere else and stops reading as a shortcut letter
+once the other four are shapes. The letter and the tool's name moved into
+a tooltip, so the keyboard is still discoverable from the palette.
+
+What it costs: the keys are no longer visible at a glance, only on hover,
+and the tooltips are reinstalled only when the row changes because the
+palette redraws twice a second to pulse the dot and reinstalling on every
+frame restarts the hover timer.
+
+## 2026-08-24 A screenshot that lands flashes a frame
+
+`screencapture -x` is right: the shutter sound would land in the audio of
+the person talking. It also means a successful screenshot and a key that
+did nothing look and sound identical, and the session that prompted this
+ended with the user saying they could not take a screenshot.
+
+Once the file is on disk the overlay flashes a white frame around every
+screen for 180ms. It is drawn after the capture completes, so it cannot
+appear in the shot it confirms, and ahead of the hidden marks check, so
+`⌥⌘H` does not silence it. A full screen capture that writes no file now
+prints the Screen Recording fix. A region capture that writes none does
+not, because escape cancels one and that is not a failure.
+
+What it costs: a 180ms frame lands in a second shot taken inside that
+window. The confirmation is worth more than that.
+
+## 2026-08-24 The palette row is measured, not eyeballed
+
+Adding the Done button pushed the row past the window and put the camera
+button and the width control underneath Stop, where a click meant to take
+a screenshot ends the session. It had already been over: at 600 wide the
+camera and the shot count were under Stop before anything was added, and
+the colour swatches, 18 wide with their targets grown to 24 on a step of
+23, each overlapped their neighbour by a point.
+
+None of that is visible from the source, so it is asserted instead. The
+palette view keeps the rectangles the drawing code registered, and
+`14-palette-layout` reads them out of a real palette in draw mode: no two
+overlap, none falls outside the window, and the controls to the right of
+the tools do not move when draw mode starts. The window went to 720 and
+the colour step to 26.
+
+What it costs: another test hook, and a window 120 points wider on the
+screen for the whole session.

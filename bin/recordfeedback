@@ -427,7 +427,8 @@ cmd_start() {
   if [ "$no_overlay" -eq 0 ] && [ -x "$OVERLAY_BIN" ]; then
     echo "  opt-cmd-A draw, opt-cmd-X screenshot, opt-cmd-R region, opt-cmd-S stop"
     echo "  opt-cmd-Z undo, opt-cmd-C clear, opt-cmd-H hide the marks"
-    echo "  in draw mode: p a r h t tools, 1 to 6 colours, [ ] width, esc to leave"
+    echo "  in draw mode: p pen, a arrow, r rectangle, h highlighter, t text"
+    echo "  esc, Done, or the same tool again stops drawing. 1 to 6 colours, [ ] width"
   else
     echo "  no overlay, so no annotations. shift-cmd-4 still takes screenshots."
   fi

@@ -307,6 +307,7 @@ Inside draw mode, plain keys with no modifier:
 | `[` `]` | thinner, thicker |
 | `u` `c` | undo, clear |
 | `esc` | leave draw mode, or commit the text being typed |
+| the active tool's own key | leave draw mode |
 
 Text is a shape like any other: a point, a colour, a size and a string.
 Click places the caret, typing edits it, `esc` or `return` commits it and
@@ -326,13 +327,28 @@ a heads-up display that fades:
   was put for the next session.
 - A red dot and the elapsed time, which is the proof that recording is
   live. The dot pulses once a second.
-- A row of tools: pen, arrow, rectangle, highlighter, text. The active
-  one is lit. Clicking one selects it and enters draw mode.
+- A row of tools: pen, arrow, rectangle, highlighter, text. Each button
+  draws the mark its tool makes rather than the letter that reaches it,
+  because five letters in a row read as one word and not as five
+  controls. The letter is in the button's tooltip with the tool's name.
+  The active one is lit. Clicking one selects it and enters draw mode,
+  and clicking the one that is already lit leaves draw mode.
+- A Done button, shown only while drawing, which leaves draw mode. The
+  way out has to be visible at the moment the overlay is holding every
+  click on the screen, not only written in a key list that scrolled away.
+  Its space in the row is held whether it is shown or not, because draw
+  mode is entered by clicking a tool and everything to the right of it
+  would otherwise move out from under the cursor that just started it.
 - Six colour swatches and a width control, both reflecting the current
   state, because the keyboard shortcuts change state that is otherwise
   invisible.
 - A camera button for the full screen shot, the number of shots taken so
   far, and a stop button.
+- One row, 720 by 46, wide enough for the state that carries the Done
+  button. Every control is a rectangle registered while the row is drawn,
+  so `14-palette-layout` can assert that none overlaps another and none
+  falls off the end. A camera button under the Stop button is a
+  screenshot key that ends the session.
 - The palette window alone has `ignoresMouseEvents = false` while idle.
   The full screen mark windows stay click through, so the palette can be
   clicked while everything under it is untouched.
@@ -340,6 +356,15 @@ a heads-up display that fades:
 The palette is furniture, so it is hidden for the instant of a capture,
 with the crosshair, and put back after. That is only possible because the
 overlay owns the capture keys.
+
+`screencapture -x` takes the shutter sound out, so that the shot does not
+land in the recording of the person talking. That leaves a successful
+screenshot looking exactly like a key that did nothing, so once the file
+is on disk the overlay flashes a white frame around every screen for
+180ms. It is drawn after the capture, so it can never appear in the shot
+it is confirming, and it is drawn even when the marks are hidden. A full
+screen capture that writes no file prints the Screen Recording fix; a
+region capture that writes none does not, because escape cancels one.
 
 The drawing model is a list of shapes. A shape is a tool, a colour, a
 width, a list of points and, for text, a string. Freehand appends points on drag. Arrow and

@@ -20,6 +20,16 @@ enum Tool: Int, CaseIterable {
     }
   }
 
+  var name: String {
+    switch self {
+    case .pen: return "pen"
+    case .arrow: return "arrow"
+    case .rect: return "rectangle"
+    case .highlighter: return "highlighter"
+    case .text: return "text"
+    }
+  }
+
   // The highlighter is useless at a pen's width and a pen is useless at the
   // highlighter's, so the width belongs to the tool and not to the session.
   var defaultWidth: CGFloat {
@@ -112,7 +122,7 @@ final class MarkView: NSView {
   override var acceptsFirstResponder: Bool { true }
 
   override func draw(_ dirtyRect: NSRect) {
-    owner?.drawMarks(screen: index)
+    owner?.drawMarks(screen: index, in: bounds)
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -135,21 +145,53 @@ final class PaletteWindow: NSPanel {
   override var canBecomeMain: Bool { false }
 }
 
-final class PaletteView: NSView {
+final class PaletteView: NSView, NSViewToolTipOwner {
   weak var owner: Overlay?
   private var hits: [(NSRect, () -> Void)] = []
+  private var tips: [(NSRect, String)] = []
+  private var installedTips: [(NSRect, String)] = []
   private var dragOrigin: NSPoint?
 
   override var isFlipped: Bool { false }
 
   override func draw(_ dirtyRect: NSRect) {
     owner?.drawPalette(in: self)
+    syncTips()
   }
 
   func clearHits() { hits.removeAll() }
 
   func addHit(_ rect: NSRect, _ action: @escaping () -> Void) {
     hits.append((rect, action))
+  }
+
+  // The rectangles the drawing code actually registered, which is the only
+  // honest source for a test asking whether two controls sit on top of one
+  // another. A layout read off the source is a layout nobody laid out.
+  var hitRects: [NSRect] { hits.map { $0.0 } }
+
+  func clearTips() { tips.removeAll() }
+
+  func addTip(_ rect: NSRect, _ text: String) { tips.append((rect, text)) }
+
+  // The palette redraws twice a second to pulse the dot, and reinstalling the
+  // tips on every one of those frames restarts the hover timer, so a tip never
+  // gets to appear. They are only reinstalled when the row actually changes.
+  private func syncTips() {
+    let same = installedTips.count == tips.count
+      && !zip(installedTips, tips).contains { pair in
+        pair.0.0 != pair.1.0 || pair.0.1 != pair.1.1
+      }
+    guard !same else { return }
+    removeAllToolTips()
+    for (rect, _) in tips { addToolTip(rect, owner: self, userData: nil) }
+    installedTips = tips
+  }
+
+  func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
+            userData: UnsafeMutableRawPointer?) -> String {
+    for (rect, text) in tips where rect.contains(point) { return text }
+    return ""
   }
 
   override func mouseDown(with event: NSEvent) {
@@ -201,6 +243,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
   private var startedAt = Date()
   private var pulseOn = true
   private var shots = 0
+  private var shutterFlash = false
   private var keyMonitor: Any?
 
   private var width: CGFloat {
@@ -250,6 +293,15 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "palette" {
       probePalette()
     }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "tools" {
+      probeTools()
+    }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "capture" {
+      probeCapture()
+    }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "layout" {
+      probeLayout()
+    }
     // Written last, so a test that waits for it knows the windows are up.
     FileManager.default.createFile(atPath: session + "/overlay.ready", contents: nil)
   }
@@ -298,7 +350,11 @@ final class Overlay: NSObject, NSApplicationDelegate {
   }
 
   private func buildPalette() {
-    let size = NSSize(width: 600, height: 46)
+    // Wide enough for draw mode, which is the widest the row gets because it is
+    // the only state carrying the Done button. The width does not change with
+    // the state: a control that moves out from under the cursor as draw mode
+    // starts is a control that gets mis-clicked.
+    let size = NSSize(width: 720, height: 46)
     let window = PaletteWindow(contentRect: NSRect(origin: .zero, size: size),
                                styleMask: [.borderless, .nonactivatingPanel],
                                backing: .buffered, defer: false)
@@ -336,7 +392,12 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if let saved = defaults.string(forKey: "palette.origin") {
       let point = NSPointFromString(saved)
       for screen in NSScreen.screens where screen.frame.contains(point) {
-        return point
+        // The origin is the bottom left corner, so a position saved by an older
+        // and narrower palette can put the right hand end, where Stop lives,
+        // past the edge of the screen.
+        let limit = screen.frame
+        return NSPoint(x: min(point.x, limit.maxX - size.width),
+                       y: min(point.y, limit.maxY - size.height))
       }
     }
     guard let screen = NSScreen.main else { return NSPoint(x: 100, y: 100) }
@@ -402,14 +463,24 @@ final class Overlay: NSObject, NSApplicationDelegate {
     paletteView?.needsDisplay = true
   }
 
+  // The palette's own way out, so that leaving draw mode is never only a key.
+  private func leaveDrawing() { setDrawing(false) }
+
   private func toggleHidden() {
     marksHidden.toggle()
     redrawMarks()
     paletteView?.needsDisplay = true
   }
 
+  // The tool is the control a person reaches for first, so it is also the one
+  // they press to put the pen down. Without this the only way out is a key the
+  // palette does not name, while the overlay is holding every click on screen.
   private func select(_ newTool: Tool) {
     commitText()
+    if drawing && newTool == tool {
+      setDrawing(false)
+      return
+    }
     tool = newTool
     if !drawing { setDrawing(true) }
     paletteView?.needsDisplay = true
@@ -544,7 +615,15 @@ final class Overlay: NSObject, NSApplicationDelegate {
 
   // MARK: drawing
 
-  func drawMarks(screen: Int) {
+  func drawMarks(screen: Int, in bounds: NSRect) {
+    // Ahead of the hidden check, because hiding the marks is not a reason to
+    // stop telling the user their screenshot was taken.
+    if shutterFlash {
+      let frame = NSBezierPath(rect: bounds.insetBy(dx: 4, dy: 4))
+      frame.lineWidth = 8
+      NSColor(white: 1, alpha: 0.9).setStroke()
+      frame.stroke()
+    }
     guard !marksHidden else { return }
     for shape in shapes where shape.screen == screen {
       stroke(shape)
@@ -654,26 +733,42 @@ final class Overlay: NSObject, NSApplicationDelegate {
 
     separator(at: x, middle: middle); x += 11
 
+    view.clearTips()
     for candidate in Tool.allCases {
       let rect = NSRect(x: x, y: middle - 14, width: 28, height: 28)
       let active = candidate == tool && drawing
-      NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).setClip()
       if active {
         NSColor(srgbRed: 0.20, green: 0.50, blue: 1.0, alpha: 0.9).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
       } else {
         NSColor(white: 1, alpha: 0.10).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
       }
-      NSGraphicsContext.current?.cgContext.resetClip()
-      label(candidate.letter, at: NSPoint(x: rect.midX - 5, y: middle - 8),
-            size: 14, weight: .semibold,
-            color: NSColor(white: 1, alpha: active ? 1.0 : 0.65))
+      NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
+      drawToolIcon(candidate, in: rect,
+                   color: NSColor(white: 1, alpha: active ? 1.0 : 0.7))
       view.addHit(rect) { [weak self] in self?.select(candidate) }
+      // A drawn shape says what a tool does but not what key reaches it, and
+      // the letters this replaced were the only place the keys were written.
+      view.addTip(rect, candidate.name + " (" + candidate.letter.lowercased() + ")")
       x += 32
     }
 
     x += 3
+
+    // Leaving draw mode is the thing a person needs most and guesses least, so
+    // it is a button and not only a key. Its space is held whether it is shown
+    // or not: draw mode is entered by clicking a tool, and everything to the
+    // right of this would otherwise jump out from under the cursor as it starts.
+    if drawing {
+      let done = NSRect(x: x, y: middle - 13, width: 52, height: 26)
+      NSColor(white: 1, alpha: 0.18).setFill()
+      NSBezierPath(roundedRect: done, xRadius: 6, yRadius: 6).fill()
+      label("Done", at: NSPoint(x: done.minX + 8, y: middle - 8), size: 13,
+            weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
+      view.addHit(done) { [weak self] in self?.leaveDrawing() }
+      view.addTip(done, "stop drawing (esc)")
+    }
+    x += 56
+
     separator(at: x, middle: middle); x += 11
 
     for (index, color) in palette.enumerated() {
@@ -688,7 +783,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
         ring.stroke()
       }
       view.addHit(rect.insetBy(dx: -3, dy: -3)) { [weak self] in self?.pick(index) }
-      x += 23
+      // The swatch is 18 wide and its target is grown to 24, so the step has to
+      // clear 24 or the seam between two colours belongs to both of them.
+      x += 26
     }
 
     x += 3
@@ -753,6 +850,69 @@ final class Overlay: NSObject, NSApplicationDelegate {
     view.addHit(rect, action)
   }
 
+  // Five letters in a row read as one word and not as five controls, which is
+  // what happened: P A R H T told a first time user nothing about what any of
+  // them draws. A shape drawn in the button is the tool's own output.
+  private func drawToolIcon(_ candidate: Tool, in box: NSRect, color: NSColor) {
+    func at(_ fx: CGFloat, _ fy: CGFloat) -> NSPoint {
+      NSPoint(x: box.minX + box.width * fx, y: box.minY + box.height * fy)
+    }
+    color.setFill()
+    color.setStroke()
+
+    switch candidate {
+    case .pen:
+      let body = NSBezierPath()
+      body.move(to: at(0.22, 0.22))
+      body.line(to: at(0.38, 0.29))
+      body.line(to: at(0.78, 0.69))
+      body.line(to: at(0.69, 0.78))
+      body.line(to: at(0.29, 0.38))
+      body.close()
+      body.fill()
+    case .arrow:
+      let shaft = NSBezierPath()
+      shaft.move(to: at(0.24, 0.24))
+      shaft.line(to: at(0.68, 0.68))
+      shaft.lineWidth = 2
+      shaft.lineCapStyle = .round
+      shaft.stroke()
+      let head = NSBezierPath()
+      head.move(to: at(0.80, 0.80))
+      head.line(to: at(0.80, 0.52))
+      head.line(to: at(0.52, 0.80))
+      head.close()
+      head.fill()
+    case .rect:
+      let outline = NSBezierPath(roundedRect: box.insetBy(dx: box.width * 0.24,
+                                                          dy: box.height * 0.28),
+                                 xRadius: 3, yRadius: 3)
+      outline.lineWidth = 2
+      outline.stroke()
+    case .highlighter:
+      let bar = NSBezierPath()
+      bar.move(to: at(0.22, 0.32))
+      bar.line(to: at(0.78, 0.68))
+      bar.lineWidth = box.width * 0.30
+      bar.lineCapStyle = .butt
+      color.withAlphaComponent(color.alphaComponent * 0.55).setStroke()
+      bar.stroke()
+    case .text:
+      // A serif T is the one glyph that is already an icon everywhere else, so
+      // it stays a letter while the other four stop being letters.
+      let font = NSFont(name: "Times New Roman", size: box.height * 0.62)
+        ?? NSFont.boldSystemFont(ofSize: box.height * 0.58)
+      let glyph = "T" as NSString
+      let attributes: [NSAttributedString.Key: Any] = [
+        .font: font, .foregroundColor: color,
+      ]
+      let size = glyph.size(withAttributes: attributes)
+      glyph.draw(at: NSPoint(x: box.midX - size.width / 2,
+                             y: box.midY - size.height / 2),
+                 withAttributes: attributes)
+    }
+  }
+
   private func separator(at x: CGFloat, middle: CGFloat) {
     NSColor(white: 1, alpha: 0.15).setFill()
     NSBezierPath(rect: NSRect(x: x, y: middle - 12, width: 1, height: 24)).fill()
@@ -798,12 +958,35 @@ final class Overlay: NSObject, NSApplicationDelegate {
           warn("  command: /usr/sbin/screencapture \(task.arguments!.joined(separator: " "))")
           warn("  fix: give this terminal Screen Recording in System Settings, Privacy and Security.")
         }
+        let wrote = FileManager.default.fileExists(atPath: path)
         DispatchQueue.main.async {
           if wasVisible { self.paletteWindow?.orderFrontRegardless() }
           self.shots = self.countShots()
+          if wrote {
+            self.confirmShot()
+          } else if !region {
+            // A region capture writes nothing when the user presses escape,
+            // which is not a failure. A full screen one always should.
+            warn("screencapture wrote no file, so that screenshot was lost.")
+            warn("  command: /usr/sbin/screencapture -x \(path)")
+            warn("  fix: give this terminal Screen Recording in System Settings, Privacy and Security.")
+          }
           self.paletteView?.needsDisplay = true
         }
       }
+    }
+  }
+
+  // The shot is taken with -x so the shutter sound stays out of the recording,
+  // and a silent capture is indistinguishable from a key that did nothing. The
+  // frame is the confirmation, drawn after the file is on disk so that it can
+  // never appear in the shot it is confirming.
+  private func confirmShot() {
+    shutterFlash = true
+    redrawMarks()
+    Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
+      self?.shutterFlash = false
+      self?.redrawMarks()
     }
   }
 
@@ -837,6 +1020,98 @@ final class Overlay: NSObject, NSApplicationDelegate {
           .write(toFile: self.session + "/palette.probe", atomically: true,
                  encoding: .utf8)
       }
+    }
+  }
+
+  // MARK: the tool and capture probes
+
+  // Picking a tool is the only control the user reaches with the mouse, so the
+  // question the probe asks is the one they asked: does pressing it again put
+  // the drawing away.
+  private func probeTools() {
+    var lines: [String] = []
+    select(.pen)
+    lines.append("after-pick \(drawing ? 1 : 0) \(tool.name)")
+    select(.pen)
+    lines.append("after-pick-again \(drawing ? 1 : 0)")
+    select(.arrow)
+    lines.append("after-switch \(drawing ? 1 : 0) \(tool.name)")
+    select(.rect)
+    lines.append("after-second-switch \(drawing ? 1 : 0) \(tool.name)")
+    select(.rect)
+    lines.append("after-second-switch-again \(drawing ? 1 : 0)")
+    setDrawing(false)
+    try? (lines.joined(separator: "\n") + "\n")
+      .write(toFile: session + "/tools.probe", atomically: true, encoding: .utf8)
+  }
+
+  // In draw mode the app is frontmost and its windows cover every screen, so a
+  // capture asked for from inside draw mode is a different situation from one
+  // asked for outside it, and it is the one the user reported losing.
+  private func probeCapture() {
+    setDrawing(true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+      self.capture(region: false)
+      // The confirmation is deliberately brief, so it has to be watched for
+      // rather than looked at once, the way the user's eye would catch it.
+      var sawFlash = false
+      var ticks = 0
+      Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { timer in
+        ticks += 1
+        if self.shutterFlash { sawFlash = true }
+        guard ticks >= 100 else { return }
+        timer.invalidate()
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: self.inbox))
+          ?? []
+        let lines = ["drawing \(self.drawing ? 1 : 0)",
+                     "files \(names.sorted().joined(separator: " "))",
+                     "confirmed \(sawFlash ? 1 : 0)",
+                     "still-flashing \(self.shutterFlash ? 1 : 0)"]
+        self.setDrawing(false)
+        try? (lines.joined(separator: "\n") + "\n")
+          .write(toFile: self.session + "/capture.probe", atomically: true,
+                 encoding: .utf8)
+      }
+    }
+  }
+
+  // Draw mode is the widest the palette ever gets, because it is the only
+  // state that shows the way out of it, so it is the state the row has to fit.
+  private func probeLayout() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+      guard let view = self.paletteView else { return }
+      view.display()
+      // Stop is anchored to the right hand end and the camera is the control
+      // before it, so its position is where every width added to the left of it
+      // shows up.
+      let idleCamera = view.hitRects.dropLast().last.map { Int($0.minX) } ?? -1
+      let idleCount = view.hitRects.count
+
+      self.setDrawing(true)
+      view.display()
+      let rects = view.hitRects
+      var overlaps: [String] = []
+      var outside = 0
+      for (index, one) in rects.enumerated() {
+        if !view.bounds.contains(one) { outside += 1 }
+        for other in rects[(index + 1)...] where one.intersects(other) {
+          overlaps.append("\(Int(one.minX)):\(Int(one.maxX))"
+                          + "/\(Int(other.minX)):\(Int(other.maxX))")
+        }
+      }
+      let drawingCamera = rects.dropLast().last.map { Int($0.minX) } ?? -1
+
+      let lines = ["width \(Int(view.bounds.width))",
+                   "controls \(rects.count)",
+                   "controls-idle \(idleCount)",
+                   "outside \(outside)",
+                   "camera-idle \(idleCamera)",
+                   "camera-drawing \(drawingCamera)",
+                   "overlaps \(overlaps.count) \(overlaps.joined(separator: " "))"]
+      self.setDrawing(false)
+      try? (lines.joined(separator: "\n") + "\n")
+        .write(toFile: self.session + "/layout.probe", atomically: true,
+               encoding: .utf8)
     }
   }
 
