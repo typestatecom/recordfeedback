@@ -31,7 +31,7 @@ Do not re-derive these. They were checked on 2026-08-24.
 | `swiftc` | `/usr/bin/swiftc`, Swift 5.10, target `arm64-apple-macosx14.0` |
 | SDK | `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` |
 | `uv`, `jq`, `python3` | all present under `/opt/homebrew/bin` |
-| avfoundation audio inputs | `[0] MacBook Pro Microphone`, `[1] CASTER Stream Mix 1`, `[2] Microsoft Teams Audio`, `[3] CASTER` |
+| avfoundation audio inputs | Several, index `0` the built-in microphone. `recordfeedback devices` lists them, and `--device N` picks one. The indexes are per machine, so nothing may assume them. |
 | Screenshot folder | `~/Screenshots`, set with `defaults write com.apple.screencapture location`. It was `~/Desktop`, which is a folder macOS protects. |
 | Protected folder access | **Not granted, and no longer needed.** `ls ~/Desktop` and `ls ~/Documents` both fail with `Operation not permitted`, so screenshots were moved out of the protected folders instead of asking for the permission. `~/Screenshots` and `~/Pictures` read fine. `doctor` still checks the folder by listing it, because `-d` succeeds on a folder macOS will not let it read, and a person who points the setting back at the Desktop needs to be told why nothing is collected. |
 | `~/.claude/commands/` | does not exist yet. `install.sh` creates it. No global slash command competes with this one. |
