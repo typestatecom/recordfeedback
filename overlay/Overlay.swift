@@ -1895,6 +1895,18 @@ final class Overlay: NSObject, NSApplicationDelegate {
     setDrawing(true)
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
       self.capture(region: false)
+      // Read now rather than at the report. What this case is about is that the
+      // capture was asked for from inside draw mode, and draw mode three
+      // seconds later is a different question with somebody else's keystrokes
+      // in it.
+      let drawingAtCapture = self.drawing
+      // A person typing at another window while this runs is the ordinary case,
+      // not a rare one, and their keys arrive here because draw mode took the
+      // foreground. Injecting the exit is the only way to test that without
+      // waiting for somebody to press esc at the right second.
+      if ProcessInfo.processInfo.environment["RF_OVERLAY_STRAY_EXIT"] == "1" {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.setDrawing(false) }
+      }
       // The confirmation is deliberately brief, so it has to be watched for
       // rather than looked at once, the way the user's eye would catch it.
       var sawFlash = false
@@ -1906,7 +1918,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
         timer.invalidate()
         let names = (try? FileManager.default.contentsOfDirectory(atPath: self.inbox))
           ?? []
-        let lines = ["drawing \(self.drawing ? 1 : 0)",
+        let lines = ["drawing \(drawingAtCapture ? 1 : 0)",
                      "files \(names.sorted().joined(separator: " "))",
                      "confirmed \(sawFlash ? 1 : 0)",
                      "still-flashing \(self.shutterFlash ? 1 : 0)"]
