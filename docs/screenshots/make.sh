@@ -1,84 +1,136 @@
 #!/usr/bin/env bash
-# Rebuilds the README shots. Takes over the screen for about fifteen seconds:
-# a backdrop covers every display so that nothing of the real desktop is in the
-# picture, the overlay draws over it, and the shots are cropped from that.
+# Rebuilds the README shots. Takes over the screen for about half a minute.
+#
+# The page in the shot is loaded in a Chrome started on a throwaway profile, so
+# it is signed out and carries no bookmarks, no extensions and nobody's account.
+# A shot of a signed in browser would publish whoever took it.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 OUT="$HERE"
+SITE="${RF_SHOT_SITE:-https://github.com}"
+CHROME="${RF_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 
 for tool in swiftc screencapture uv; do
   command -v "$tool" > /dev/null 2>&1 || {
     echo "docs/screenshots/make.sh: $tool is not installed." >&2
+    echo "  command: $tool" >&2
     echo "  fix: install the Xcode command line tools with: xcode-select --install" >&2
     exit 1
   }
 done
+[ -x "$CHROME" ] || {
+  echo "docs/screenshots/make.sh: no Chrome at $CHROME." >&2
+  echo "  fix: install Google Chrome, or set RF_CHROME to the binary inside another one." >&2
+  exit 1
+}
 
 work="$(mktemp -d -t rf-shots)"
-backdrop_pid=""
+chrome_pid=""
 overlay_pid=""
 cleanup() {
   [ -n "$overlay_pid" ] && kill -TERM "$overlay_pid" 2>/dev/null || true
-  [ -n "$backdrop_pid" ] && kill -TERM "$backdrop_pid" 2>/dev/null || true
+  [ -n "$chrome_pid" ] && kill -TERM "$chrome_pid" 2>/dev/null || true
   rm -rf "$work"
 }
 trap cleanup EXIT
-
-echo "building the backdrop"
-swiftc -O -framework Cocoa -o "$work/backdrop" "$HERE/backdrop.swift"
 
 echo "building the overlay with its probes"
 "$REPO/overlay/build.sh" --probes > "$work/build.log" 2>&1 \
   || { echo "the overlay would not build:"; sed 's/^/  /' "$work/build.log"; exit 1; }
 
-echo "taking the screen for a few seconds"
-"$work/backdrop" & backdrop_pid=$!
-sleep 2
+# One overlay run per shot, because the palette wears a different row in each.
+shoot() {
+  local name="$1" quiet="$2"
+  local session="$work/$name"
+  mkdir -p "$session"
+  RF_SESSION="$session" RF_OVERLAY_SELFTEST=poster RF_POSTER_QUIET="$quiet" \
+    "$REPO/bin/rf-overlay-probe" > "$work/$name.log" 2>&1 & overlay_pid=$!
 
-session="$work/session"
-mkdir -p "$session"
-RF_SESSION="$session" RF_OVERLAY_SELFTEST=poster "$REPO/bin/rf-overlay-probe" \
-  > "$work/overlay.log" 2>&1 & overlay_pid=$!
-sleep 4
-
-screencapture -x "$work/full.png"
-
-kill -TERM "$overlay_pid" 2>/dev/null || true; overlay_pid=""
-kill -TERM "$backdrop_pid" 2>/dev/null || true; backdrop_pid=""
-sleep 1
-
-[ -s "$work/full.png" ] || {
-  echo "screencapture wrote nothing." >&2
-  echo "  fix: give this terminal Screen Recording in System Settings, Privacy and Security." >&2
-  exit 1
+  local waited=0
+  while [ ! -f "$session/poster.probe" ]; do
+    sleep 0.2
+    waited=$((waited + 1))
+    [ "$waited" -lt 100 ] || { echo "the overlay never reported for $name" >&2; exit 1; }
+  done
+  # Long enough that any notification the machine threw up has gone again. One
+  # of those in a published shot is somebody's private business.
+  sleep 6
+  screencapture -x "$work/$name.png"
+  kill -TERM "$overlay_pid" 2>/dev/null || true; overlay_pid=""
+  sleep 1
+  [ -s "$work/$name.png" ] || {
+    echo "screencapture wrote nothing." >&2
+    echo "  command: screencapture -x $work/$name.png" >&2
+    echo "  fix: give this terminal Screen Recording in System Settings, Privacy and Security." >&2
+    exit 1
+  }
+  cp "$session/poster.probe" "$work/$name.probe"
 }
 
-# The menu bar is cropped off. It carries the session timer, which is worth
-# showing, but it also carries whatever else this machine happens to run, and
-# none of that belongs in a public README. The timer gets its own shot instead.
-uv run --quiet --with pillow python - "$work/full.png" "$OUT" <<'PY'
+echo "opening $SITE on a throwaway profile"
+"$CHROME" --user-data-dir="$work/chrome" --no-first-run --no-default-browser-check \
+  --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-notifications \
+  --window-position=0,0 --window-size=1512,940 "$SITE" > "$work/chrome.log" 2>&1 &
+chrome_pid=$!
+sleep 10
+
+echo "drawing on it"
+shoot annotating 0
+echo "and again with nothing drawn"
+shoot quiet 1
+
+kill -TERM "$chrome_pid" 2>/dev/null || true; chrome_pid=""
+
+uv run --quiet --with pillow python - "$work" "$OUT" <<'PY'
 import sys
 from PIL import Image
 
-source, out = sys.argv[1], sys.argv[2]
-image = Image.open(source).convert("RGB")
-w, h = image.size
-scale = w / 1512 if w > 1512 else 1        # retina captures are twice the points
+work, out = sys.argv[1], sys.argv[2]
 
-def save(name, box, target_width):
+
+def probe(name):
+    values = {}
+    for line in open(f"{work}/{name}.probe"):
+        parts = line.split()
+        values[parts[0]] = [int(n) for n in parts[1:]]
+    return values
+
+
+def save(image, name, box, target_width):
     crop = image.crop(box)
     ratio = target_width / crop.width
     crop.resize((target_width, max(1, round(crop.height * ratio))),
                 Image.LANCZOS).save(f"{out}/{name}", optimize=True)
     print(f"wrote {out}/{name}")
 
-menu_bar = round(37 * scale)
-save("annotating.png", (0, menu_bar, w, h), 1400)
-# The palette sits centred near the bottom edge, which is where the overlay
-# puts it until somebody drags it.
-save("palette.png",
-     (round(w * 0.03), h - round(105 * scale), round(w * 0.97), h - round(30 * scale)),
-     1200)
+
+def palette_box(image, name, pad):
+    """The palette's own frame, turned from screen points into image pixels.
+
+    Cropping by eye is what put the bar off centre the first time. The overlay
+    knows exactly where it put the window, so it is asked instead of guessed.
+    Screen points count up from the bottom left and image pixels count down
+    from the top left, which is the whole of the arithmetic below.
+    """
+    values = probe(name)
+    x, y, w, h = values["palette"]
+    screen_width, screen_height = values["screen"]
+    scale = image.width / screen_width
+    top = (screen_height - y - h) * scale
+    return (round(x * scale) - pad, round(top) - pad,
+            round((x + w) * scale) + pad, round(top + h * scale) + pad)
+
+
+shot = Image.open(f"{work}/annotating.png").convert("RGB")
+menu_bar = round(37 * (shot.width / probe("annotating")["screen"][0]))
+save(shot, "annotating.png", (0, menu_bar, shot.width, shot.height), 1400)
+
+# Equal padding on every side, measured from the window the overlay reports, so
+# the bar sits in the middle of its own picture.
+for source, name in (("annotating", "palette.png"), ("quiet", "palette-quiet.png")):
+    image = Image.open(f"{work}/{source}.png").convert("RGB")
+    pad = round(20 * (image.width / probe(source)["screen"][0]))
+    save(image, name, palette_box(image, source, pad), 1200)
 PY

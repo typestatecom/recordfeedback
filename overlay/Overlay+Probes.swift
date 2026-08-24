@@ -398,41 +398,57 @@ extension Overlay {
 
   // Posting synthetic mouse events needs Accessibility, which cannot be granted
   // without a person, so the test drives the same three calls the mouse does.
-  // The documentation shots. Draws one of each mark over the backdrop and stays
-  // in draw mode with the palette up, so that what the README shows is the real
-  // overlay rather than a picture of one.
+  // The documentation shots. Draws the marks over whatever is behind it and
+  // reports where the palette ended up, so the crop can be exact rather than
+  // guessed. RF_POSTER_QUIET leaves draw mode alone, which is how the palette
+  // is caught in the narrow row it wears while a person is only talking.
   func probePoster() {
     guard let screen = NSScreen.main else { return }
     let size = screen.frame.size
-    setDrawing(true)
+    let quiet = ProcessInfo.processInfo.environment["RF_POSTER_QUIET"] == "1"
 
-    func stroke(_ points: [NSPoint], _ newTool: Tool, _ colour: Int, _ pen: CGFloat) {
-      tool = newTool
-      colorIndex = colour
-      width = pen
-      guard let first = points.first else { return }
-      beginStroke(at: first, screen: 0)
-      for point in points.dropFirst() { extendStroke(to: point) }
-      endStroke(at: points.last!)
+    if !quiet {
+      setDrawing(true)
+
+      func at(_ fx: CGFloat, _ fy: CGFloat) -> NSPoint {
+        NSPoint(x: size.width * fx, y: size.height * fy)
+      }
+
+      // Two marks and no more. The point of the picture is the tool, and a
+      // screen covered in ink says nothing about how it is used.
+      tool = .rect
+      colorIndex = 0
+      width = 5
+      beginStroke(at: at(0.278, 0.320), screen: 0)
+      extendStroke(to: at(0.464, 0.390))
+      endStroke(at: at(0.464, 0.390))
+
+      tool = .text
+      colorIndex = 0
+      beginStroke(at: at(0.281, 0.286), screen: 0)
+      if let index = editing { shapes[index].text = "placeholder is left aligned" }
+      commitText()
+
+      tool = .arrow
+      redrawMarks()
+      for view in markViews { view.display() }
     }
 
-    // An arrow at the row a person would be talking about, a box round the
-    // heading, and a highlighter under the button they mean.
-    stroke([NSPoint(x: size.width * 0.90, y: size.height * 0.42),
-            NSPoint(x: size.width * 0.795, y: size.height * 0.545)], .arrow, 0, 8)
-    stroke([NSPoint(x: size.width * 0.17, y: size.height * 0.70),
-            NSPoint(x: size.width * 0.38, y: size.height * 0.77)], .rect, 2, 6)
-    stroke([NSPoint(x: size.width * 0.755, y: size.height * 0.218),
-            NSPoint(x: size.width * 0.826, y: size.height * 0.218)], .highlighter, 3, 30)
-
-    tool = .arrow
-    redrawMarks()
-    for view in markViews { view.display() }
+    // Where the palette actually is, in screen points with the origin at the
+    // bottom left, and how tall the screen is so the crop can turn that into
+    // the top left the image file uses.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+      guard let palette = self.paletteWindow else { return }
+      let frame = palette.frame
+      let lines = ["palette \(Int(frame.minX)) \(Int(frame.minY)) " +
+                   "\(Int(frame.width)) \(Int(frame.height))",
+                   "screen \(Int(size.width)) \(Int(size.height))"]
+      try? (lines.joined(separator: "\n") + "\n")
+        .write(toFile: self.session + "/poster.probe", atomically: true,
+               encoding: .utf8)
+    }
   }
 
-  // The clear key is the one a person goes looking for and does not find, so
-  // the palette has to carry it as a control. This presses that control the way
-  // a click does and checks the marks actually go.
   func probeClearButton() {
     setDrawing(true)
     tool = .pen
