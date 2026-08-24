@@ -625,6 +625,50 @@ transcript_words() {
     | tr -s '[:space:]' '\n' | grep -c '[[:alnum:]]' || echo 0
 }
 
+# ------------------------------------------------------------------------ wait
+
+# One slash command has to cover a session of any length, and a Claude Code
+# tool call cannot run longer than 600 seconds. So wait comes back with a
+# timeout that means nothing is wrong and the caller simply calls it again.
+cmd_wait() {
+  local timeout=570
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --timeout) timeout="${2:-}"; shift 2 ;;
+      *) die "wait: unknown option '$1'" "recordfeedback wait [--timeout SECONDS]" ;;
+    esac
+  done
+  case "$timeout" in
+    ''|*[!0-9]*) die "wait: --timeout takes whole seconds, got '$timeout'" ;;
+  esac
+
+  local session
+  session="$(live_session || true)"
+  [ -n "$session" ] || die "wait: no session is running" "" \
+    "start one with: recordfeedback start"
+
+  local pid
+  pid="$(read_pid "$session/ffmpeg.pid")" || pid=""
+
+  # Half a second is fast enough that the stop hotkey feels immediate and slow
+  # enough to cost nothing over an hour.
+  local ticks=0
+  local limit=$((timeout * 2))
+  while [ "$ticks" -lt "$limit" ]; do
+    [ -f "$session/stop" ] && return 0
+    if [ -n "$pid" ] && ! pid_alive "$pid"; then
+      echo "recordfeedback: the recorder stopped on its own." >&2
+      echo "  last lines of $session/ffmpeg.log:" >&2
+      tail -n 20 "$session/ffmpeg.log" 2>/dev/null | sed 's/^/    /' >&2
+      echo "  fix: run recordfeedback stop to keep whatever was recorded." >&2
+      return 3
+    fi
+    sleep 0.5
+    ticks=$((ticks + 1))
+  done
+  return 2
+}
+
 # ------------------------------------------------------------------- feedback
 
 # The join is the reason this tool exists: a picture placed at the second it
@@ -927,6 +971,7 @@ main() {
     abort) cmd_abort "$@" ;;
     devices) cmd_devices "$@" ;;
     last) cmd_last "$@" ;;
+    wait) cmd_wait "$@" ;;
     stop) cmd_stop "$@" ;;
     feedback) cmd_feedback "$@" ;;
     collect) cmd_collect "$@" ;;
