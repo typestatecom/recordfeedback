@@ -172,6 +172,15 @@ hotkey already halted it.
    `feedback.md` as the last line, alone, so the caller can read it
    without parsing prose.
 
+Step 5 is the only one that needs a model on disk and a working whisper,
+so it is the step most likely to fail, and it runs in a subshell because
+its own failure path exits. The audio, the screenshots and their timings
+all survive it. The document is written either way, with the half that
+lived, and stop says where the recording was kept and how to fill the
+words in later. The last line is still the path to the document, because
+everything that calls this tool reads that line and a failure that
+changes it strands the caller as well as the session.
+
 ### `status`, `abort`, `last`, `devices`, `doctor`
 
 `status` prints the active session, elapsed time, audio file size and
@@ -180,7 +189,11 @@ screenshot count so far. `abort` stops everything and marks the session
 session that has a `feedback.md`. `devices` lists the avfoundation audio
 inputs with their indexes. `doctor` checks every dependency in the table
 above, the model file, the microphone permission and that the overlay
-binary is built, and prints one line per check.
+binary is built, and prints one line per check. It also reports an
+overlay that is running with no session behind it, because from in front
+of one there is nothing to tell it apart from a session that is simply
+running, and that is where a person looks when they cannot make the
+window go away.
 
 ## The transcript JSON
 
@@ -322,6 +335,22 @@ The stop key writes `$SESSION/stop`, where the session path comes from the
 `RF_SESSION` environment variable the CLI sets when it launches the
 overlay. The overlay never reads `~/.recordfeedback/current`, because
 the session it belongs to is the one that started it.
+
+Stopping is answered before anything is done, because nothing that stop
+does can be seen: flushing the recorder, transcribing and merging all
+take time and none of them show. The row and the menu bar say the click
+landed at once, or the button reads as broken and gets pressed again.
+
+The stop file is a request, and it is only answered by whoever is
+watching for it. Nobody is, if the CLI died or was never waiting, and
+then the window stays on the screen with its stop button doing nothing
+while the recorder runs on. So the request has a deadline, thirty seconds
+by default and `RF_RESCUE_SECONDS` in a test, after which the overlay
+finishes the session itself by running the CLI at `RF_CLI`, says in its
+log why, and quits. It runs the CLI rather than reimplementing any of it,
+because a second copy of the shutdown is a second thing to get wrong
+about somebody's recording. `19-orphan-rescue` presses stop with nothing
+at all listening and waits for `feedback.md`.
 
 Inside draw mode, plain keys with no modifier:
 

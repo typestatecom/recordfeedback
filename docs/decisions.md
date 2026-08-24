@@ -426,3 +426,45 @@ only route to is reachable when the item cannot be seen.
 What it costs: a second route to the settings, and a start that waits up
 to three seconds for the overlay to have something to say before it
 prints its banner.
+
+## 2026-08-24 A stop nobody answers finishes itself
+
+The overlay's stop button writes a file and waits for the CLI to come and
+finish the session. Nothing answers that file if the CLI died or was
+never watching, and then the window stays on the screen, the button does
+nothing anybody can see, and the recorder runs on. That happened to this
+tool's own user for forty minutes, and from in front of the window there
+was no way to tell it from a session that was simply running.
+
+Three changes. The click is answered before anything is done, because
+nothing a stop does can be seen: the row says Ending and the menu bar
+says stopping, at once. The request has a deadline, after which the
+overlay runs the CLI itself and quits, rather than reimplementing the
+shutdown in Swift where a second copy would be a second thing to get
+wrong about somebody's recording. And `doctor` reports an overlay with no
+session behind it, since that is where a person looks when they cannot
+make a window go away.
+
+What it costs: the CLI's path is passed to the overlay in the
+environment, and a stop that a slow caller answers after thirty seconds
+is answered twice. The second one was already harmless: `stop.ref` fixes
+the end of the window on the first stop and is not widened by a later
+one.
+
+## 2026-08-24 A stop that cannot transcribe still hands over the pictures
+
+Finding the rescue above meant running a stop with no whisper model on
+the path, which exposed something worse: `cmd_transcribe` ends the script
+when the model is missing, so `cmd_stop` died before writing anything.
+The audio, the screenshots and their timings were all on disk and nothing
+joined them, and the caller never got the path it reads off the last
+line.
+
+Transcription now runs in a subshell, and the document is written either
+way with the half that survived. Stop says where the recording was kept
+and how to fill the words in later. The last line is still the path,
+because everything that calls this tool reads that line and a failure
+that changes it strands the caller as well as the session.
+
+What it costs: a stop can now succeed while producing a document with no
+words in it, so the message that says why has to be read.

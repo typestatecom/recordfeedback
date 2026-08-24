@@ -638,6 +638,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // Set the instant Stop is pressed, so the row and the menu bar can say the
   // click landed before anything downstream has had time to answer it.
   private(set) var stopping = false
+  private var stopRequestedAt = Date()
 
   private var width: CGFloat {
     get { widths[tool] ?? tool.defaultWidth }
@@ -695,6 +696,10 @@ final class Overlay: NSObject, NSApplicationDelegate {
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "layout" {
       probeLayout()
+    }
+    // Presses the stop button, with nothing at all watching for the answer.
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "rescue" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.stopSession() }
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "leave" {
       probeLeave()
@@ -1442,15 +1447,26 @@ final class Overlay: NSObject, NSApplicationDelegate {
   private func drawAnchoredEnd(in view: PaletteView, bounds: NSRect, mid: CGFloat) {
     var right = bounds.maxX - 14
 
+    // Flushing the recorder, transcribing and merging all take time and none of
+    // them show. Without this the button reads as broken and gets pressed
+    // again, which is what its own user did.
     let stop = NSRect(x: right - 54, y: mid - 15, width: 54, height: 30)
-    NSColor(srgbRed: 0.85, green: 0.20, blue: 0.17, alpha: 0.95).setFill()
+    if stopping {
+      NSColor(white: 1, alpha: 0.13).setFill()
+    } else {
+      NSColor(srgbRed: 0.85, green: 0.20, blue: 0.17, alpha: 0.95).setFill()
+    }
     NSBezierPath(roundedRect: stop, xRadius: 7, yRadius: 7).fill()
-    label("Stop", at: NSPoint(x: stop.midX - 16, y: mid - 7), size: 13,
-          weight: .semibold, color: .white)
+    label(stopping ? "Ending" : "Stop",
+          at: NSPoint(x: stop.midX - (stopping ? 21 : 16), y: mid - 7), size: 13,
+          weight: .semibold, color: NSColor(white: 1, alpha: stopping ? 0.75 : 1))
     view.addHit(stop) { [weak self] in self?.stopSession() }
-    view.addTip(stop, "end the session (" + Settings.shared.shortcut(.stop).plain + ")")
+    view.addTip(stop, stopping
+                  ? "finishing the session, this takes a moment"
+                  : "end the session (" + Settings.shared.shortcut(.stop).plain + ")")
     view.name("stop", stop)
-    hint(Settings.shared.shortcut(.stop).display, under: stop, view: view)
+    hint(stopping ? "please wait" : Settings.shared.shortcut(.stop).display,
+         under: stop, view: view)
     right = stop.minX - 12
 
     let count = NSRect(x: right - 46, y: mid - 9, width: 46, height: 18)
@@ -1738,10 +1754,74 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // MARK: stop
 
   private func stopSession() {
+    guard !stopping else { return }
+    // Answering the click is the first thing that happens, before anything
+    // that can take time. Stopping a session means flushing the recorder,
+    // transcribing and merging, and none of that has any effect the user can
+    // see: the row and the menu bar have to say the click landed by
+    // themselves, or the button reads as broken and gets pressed again.
+    stopping = true
+    stopRequestedAt = Date()
+    paletteView?.needsDisplay = true
+    refreshStatusItem()
+    rebuildMenu()
+
     // The session path comes from the environment the CLI set, so this always
     // stops the session this overlay belongs to and never a later one.
     FileManager.default.createFile(atPath: session + "/stop", contents: nil)
-    paletteView?.needsDisplay = true
+
+    // The stop file is a request, and it is only answered by whoever is
+    // watching for it. Nobody is, if the CLI died or was never waiting, and
+    // then this window stays on the screen with its stop button doing nothing
+    // anybody can see, while the recorder runs on. So the request has a
+    // deadline, after which the overlay finishes the session itself.
+    let deadline = Double(ProcessInfo.processInfo.environment["RF_RESCUE_SECONDS"]
+                            ?? "") ?? 30
+    Timer.scheduledTimer(withTimeInterval: deadline, repeats: false) { [weak self] _ in
+      self?.finishSessionAlone()
+    }
+  }
+
+  // Everything that makes a session worth having is written by the CLI: the
+  // recorder is flushed with its own q command, the words are transcribed and
+  // the document is merged. So this runs the CLI rather than reimplementing
+  // any of it in Swift, where a second copy would be a second thing to get
+  // wrong about somebody's recording.
+  private func finishSessionAlone() {
+    let cli = ProcessInfo.processInfo.environment["RF_CLI"] ?? ""
+    warn("stop was pressed \(Int(Date().timeIntervalSince(stopRequestedAt)))s ago"
+         + " and nothing was listening for it.")
+    guard !cli.isEmpty, FileManager.default.isExecutableFile(atPath: cli) else {
+      warn("  RF_CLI is not set, so this overlay cannot finish the session"
+           + " itself and is leaving it alone rather than losing it.")
+      warn("  the recording is still running and nothing has been lost.")
+      warn("  fix: recordfeedback stop \(session)")
+      NSApp.terminate(nil)
+      return
+    }
+    warn("  finishing it here instead, with: \(cli) stop \(session)")
+    warn("  nothing is lost: the recorder is flushed the same way, and the"
+         + " document is written to \(session)/feedback.md.")
+
+    // Detached, because this process is about to end and the work outlives it.
+    let task = Process()
+    task.executableURL = URL(fileURLWithPath: "/bin/sh")
+    task.arguments = ["-c", "nohup " + shellQuoted(cli) + " stop " + shellQuoted(session)
+                      + " >> " + shellQuoted(session + "/rescue.log") + " 2>&1 &"]
+    do {
+      try task.run()
+      task.waitUntilExit()
+    } catch {
+      warn("  that would not run: \(error.localizedDescription)")
+      warn("  fix: recordfeedback stop \(session)")
+    }
+    NSApp.terminate(nil)
+  }
+
+  // macOS names screenshots with spaces in them, and a session directory sits
+  // under a home directory that can have one too.
+  private func shellQuoted(_ text: String) -> String {
+    "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
   }
 
   // MARK: the palette probe
