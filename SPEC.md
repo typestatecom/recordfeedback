@@ -269,11 +269,25 @@ no Accessibility permission, and a `CGEventTap` does. Use Carbon.
 
 | Key | Action |
 | --- | --- |
-| `⌥⌘D` | toggle draw mode |
+| `⌥⌘A` | toggle draw mode |
+| `⌥⌘X` | screenshot the whole screen, instantly |
+| `⌥⌘R` | screenshot a region, crosshair and drag |
 | `⌥⌘C` | clear all marks |
 | `⌥⌘Z` | undo the last mark |
 | `⌥⌘S` | stop the recording session |
 | `⌥⌘H` | hide or show the marks without clearing them |
+
+`⌥⌘D` is macOS's own show and hide the Dock, and Carbon will not register
+a hotkey the system already owns, so draw mode is `⌥⌘A` for annotate.
+
+The overlay takes the screenshots itself, with `screencapture -x` for
+`⌥⌘X` and `screencapture -i` for `⌥⌘R`, straight into `$SESSION/inbox`.
+`⇧⌘4` still works and `collect` still sweeps the screenshot folder, but
+neither is the path the tool asks for. The overlay's own capture is what
+makes the palette below possible: it hides its own furniture for the
+instant of the capture and puts it back after, so the marks land in the
+file and the tool's own controls do not. A shot in the inbox also needs
+no access to a folder macOS protects.
 
 `⌥⌘S` writes `$SESSION/stop`, where the session path comes from the
 `RF_SESSION` environment variable the CLI sets when it launches the
@@ -288,18 +302,47 @@ Inside draw mode, plain keys with no modifier:
 | `a` | arrow, straight, head at the end of the drag |
 | `r` | rectangle outline |
 | `h` | highlighter, thick and translucent |
+| `t` | text, click to place a caret and type |
 | `1`…`6` | red, orange, yellow, green, blue, white |
 | `[` `]` | thinner, thicker |
 | `u` `c` | undo, clear |
-| `esc` | leave draw mode |
+| `esc` | leave draw mode, or commit the text being typed |
 
-A heads-up display, top centre, shows the tool, the colour and the
-width when draw mode is entered and after any change, and fades out
-after 1.5 seconds. It must fade fully, because anything still on screen
-lands in the next screenshot.
+Text is a shape like any other: a point, a colour, a size and a string.
+Click places the caret, typing edits it, `esc` or `return` commits it and
+clicking elsewhere commits it and starts another. An empty string commits
+nothing. While text is being typed the plain letter keys are text and not
+tool shortcuts, which is the one place in the overlay where a key means
+two things, so the palette says which mode is on.
+
+### The palette
+
+A person who is talking to their computer cannot tell whether a silent
+tool is recording, and a tool that lost the microphone without saying so
+wastes the whole session. So the overlay shows one small window, and not
+a heads-up display that fades:
+
+- Bottom centre by default, draggable anywhere, and it remembers where it
+  was put for the next session.
+- A red dot and the elapsed time, which is the proof that recording is
+  live. The dot pulses once a second.
+- A row of tools: pen, arrow, rectangle, highlighter, text. The active
+  one is lit. Clicking one selects it and enters draw mode.
+- Six colour swatches and a width control, both reflecting the current
+  state, because the keyboard shortcuts change state that is otherwise
+  invisible.
+- A camera button for the full screen shot, the number of shots taken so
+  far, and a stop button.
+- The palette window alone has `ignoresMouseEvents = false` while idle.
+  The full screen mark windows stay click through, so the palette can be
+  clicked while everything under it is untouched.
+
+The palette is furniture, so it is hidden for the instant of a capture,
+with the crosshair, and put back after. That is only possible because the
+overlay owns the capture keys.
 
 The drawing model is a list of shapes. A shape is a tool, a colour, a
-width and a list of points. Freehand appends points on drag. Arrow and
+width, a list of points and, for text, a string. Freehand appends points on drag. Arrow and
 rectangle keep two points and update the second one while dragging.
 Redraw everything in `draw(_:)`. Undo removes the last shape. This is
 small enough that nothing more clever is needed, and a shape list is

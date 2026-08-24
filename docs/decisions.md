@@ -132,3 +132,22 @@ and says the recording was silent.
 What it costs: one extra ffmpeg pass over the WAV at stop time, and a
 threshold. -60 dBFS is far below a person talking in a quiet room, which
 sits above -40, and far above a muted microphone, which lands near -91.
+
+## 2026-08-24 The overlay takes the screenshots and shows a palette
+
+Three things asked for at once, and they turn out to be one decision. A
+visible recording indicator cannot exist while `screencapture` composites
+the screen, because the indicator lands in every shot. It can exist the
+moment the overlay owns the capture key: it hides its own furniture,
+captures, and puts it back. So `⌥⌘X` takes the whole screen and `⌥⌘R`
+takes a region, both straight into `$SESSION/inbox`, and the palette can
+stay on screen showing a red dot, the elapsed time, the tools and the
+colours.
+
+What it costs: the tool now asks people to learn a key instead of using
+`⇧⌘4`. `⇧⌘4` still works and `collect` still sweeps the screenshot
+folder, so nothing breaks for anyone who forgets, they just get the
+palette in the picture.
+
+`⌥⌘D` from the spec was macOS's own show and hide the Dock, which Carbon
+refuses to register, so draw mode moved to `⌥⌘A`.
