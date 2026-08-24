@@ -197,7 +197,12 @@ final class Overlay: NSObject, NSApplicationDelegate {
   let anchoredControls = ["shots", "region", "camera", "stop"]
 
   let paletteHeight: CGFloat = 52
-  var paletteWidth: CGFloat { drawing ? 956 : 446 }
+  // The row the tools open into. Named because three separate things have to
+  // agree about it: the width itself, the room kept for it at the left edge of
+  // the screen, and where the narrow row starts so that opening it lands in the
+  // middle rather than off to one side.
+  let paletteDrawingWidth: CGFloat = 956
+  var paletteWidth: CGFloat { drawing ? paletteDrawingWidth : 446 }
 
   func buildPalette() {
     // The idle width. The tools, the colours and the width control belong to
@@ -240,20 +245,29 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // the end that stays put when the row changes width.
   func paletteOrigin(for size: NSSize) -> NSPoint {
     let defaults = UserDefaults.standard
-    if let saved = defaults.string(forKey: "palette.anchor") {
+    var saved = defaults.string(forKey: "palette.anchor")
+    #if RF_PROBES
+    // A case about where the palette lands cannot be at the mercy of wherever
+    // the person on this machine last dragged it.
+    if ProcessInfo.processInfo.environment["RF_FRESH_PALETTE"] == "1" { saved = nil }
+    #endif
+    if let saved = saved {
       let anchor = NSPointFromString(saved)
       for screen in NSScreen.screens where screen.frame.contains(anchor) {
         let limit = screen.frame
         // Room for the wide row, so that entering draw mode never runs the
         // left hand end off the edge of the screen.
-        let right = min(max(anchor.x, limit.minX + 894), limit.maxX)
+        let right = min(max(anchor.x, limit.minX + paletteDrawingWidth), limit.maxX)
         return NSPoint(x: right - size.width,
                        y: min(anchor.y, limit.maxY - size.height))
       }
     }
     guard let screen = NSScreen.main else { return NSPoint(x: 100, y: 100) }
-    return NSPoint(x: screen.frame.midX - size.width / 2,
-                   y: screen.frame.minY + 40)
+    // Centre the row it opens into, not the one it starts as. The right hand
+    // end is the anchor, so centring the narrow row leaves the wide one hanging
+    // off to the left the first time anybody presses draw.
+    let right = screen.frame.midX + paletteDrawingWidth / 2
+    return NSPoint(x: right - size.width, y: screen.frame.minY + 40)
   }
 
   func rememberPalettePosition(_ origin: NSPoint) {

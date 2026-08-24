@@ -552,3 +552,14 @@ that ever wraps more than a probe entry point would be tested and never
 shipped. Keep the guard around entry points only. The cases that drive
 the overlay without a probe, and `19-orphan-rescue` through the CLI, still
 run the real thing.
+
+## 2026-08-24 The palette opens centred, by anchoring its right hand end
+
+The row grows leftwards from its right hand end so that Stop and the two
+capture buttons stay under the cursor when draw mode widens it. The first
+position used to centre the narrow row, which put the wide one 255 points
+left of the middle on every fresh install, with nobody having dragged it
+anywhere. The anchor now starts at `midX + paletteDrawingWidth / 2`, so
+the row it opens into is the one that is centred and the narrow row sits
+a little right of middle. The cost is that the idle row is off centre,
+which is the lesser of the two since it is the row nobody is looking at.
