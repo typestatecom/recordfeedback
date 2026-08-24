@@ -426,7 +426,7 @@ extension Overlay {
       tool = .text
       colorIndex = 0
       beginStroke(at: at(0.281, 0.286), screen: 0)
-      if let index = editing { shapes[index].text = "placeholder is left aligned" }
+      if let index = editing { shapes[index].text = "this text is not centred" }
       commitText()
 
       tool = .arrow

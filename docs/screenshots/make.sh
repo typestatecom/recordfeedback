@@ -45,7 +45,10 @@ shoot() {
   local name="$1" quiet="$2"
   local session="$work/$name"
   mkdir -p "$session"
+  # A fresh anchor, so the shot shows where the palette opens for somebody who
+  # has just installed this and not where it was last dragged on this machine.
   RF_SESSION="$session" RF_OVERLAY_SELFTEST=poster RF_POSTER_QUIET="$quiet" \
+    RF_FRESH_PALETTE=1 \
     "$REPO/bin/rf-overlay-probe" > "$work/$name.log" 2>&1 & overlay_pid=$!
 
   local waited=0
