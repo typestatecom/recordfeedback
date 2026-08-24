@@ -133,8 +133,29 @@ recordfeedback doctor    check every dependency, the model, the mic and the over
 
 Sessions live outside the repository, in
 `~/.recordfeedback/sessions/<timestamp>/`, holding the audio, the
-transcript, the screenshots and `feedback.md`. Nothing is deleted for
-you.
+transcript, the screenshots and `feedback.md`.
+
+## What accumulates on disk
+
+Worth knowing before you use it on anything sensitive. Every session
+keeps, forever and in the clear:
+
+- the recorded audio, and a verbatim transcript of everything said while
+  the microphone was live, including whatever else was in the room,
+- full screen screenshots, which capture every window that was open and
+  not only the one you were pointing at.
+
+There is no retention policy, no pruning and no automatic cleanup
+anywhere in this tool. That is deliberate, since a session you cannot go
+back to is worth little, but it means the folder only grows. Delete what
+you no longer want:
+
+```bash
+rm -rf ~/.recordfeedback/sessions/<timestamp>
+```
+
+Nothing leaves your machine. Transcription is local whisper.cpp, and the
+tool makes no network calls at all.
 
 Environment: `RF_HOME`, `RF_MODEL`, `RF_LANG`, `RF_SHOT_DIR`,
 `RF_KEEP_SHOTS`, `RF_BIN_DIR`, `RF_COMMANDS_DIR`.
