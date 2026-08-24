@@ -50,8 +50,11 @@ and never parse stdout.
   README.md                install and daily use, written last
   bin/recordfeedback       the CLI, bash
   bin/rf-overlay           built Swift binary, git-ignored
-  overlay/Overlay.swift    the annotation overlay, one file
-  overlay/build.sh         swiftc invocation
+  overlay/*.swift          the annotation overlay, one file per type
+  overlay/Overlay.swift      the controller: its state and its lifecycle
+  overlay/Overlay+*.swift    the controller by section
+  overlay/main.swift         the entry point, which Swift allows nowhere else
+  overlay/build.sh         swiftc invocation, --probes for the test build
   commands/recordfeedback.md   the Claude Code slash command
   install.sh               symlinks the CLI and the slash command
   test/run.sh              the whole test suite, no framework
@@ -256,11 +259,20 @@ Rules for the merge:
 
 ## The overlay
 
-`overlay/Overlay.swift`, one file, built by `overlay/build.sh`:
+`overlay/*.swift`, one file per type, built by `overlay/build.sh` in a
+single call over the whole folder so a file added and left out of the
+build cannot fail later at the first call into it:
 
 ```
-swiftc -O -framework Cocoa -framework Carbon -o bin/rf-overlay overlay/Overlay.swift
+swiftc -O -framework Cocoa -framework Carbon -o bin/rf-overlay overlay/*.swift
 ```
+
+`overlay/build.sh --probes` adds `-D RF_PROBES` and writes
+`bin/rf-overlay-probe`. That build carries the `RF_OVERLAY_SELFTEST`
+entry points and the shipped one does not, so the probes cannot be
+reached in the binary a person installs. Cases that drive a probe get it
+from `probe_overlay` in `test/lib.sh`, and the CLI takes `RF_OVERLAY_BIN`
+for the one case that launches the overlay through it.
 
 Behaviour:
 

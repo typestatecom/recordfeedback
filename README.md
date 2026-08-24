@@ -163,9 +163,15 @@ Environment: `RF_HOME`, `RF_MODEL`, `RF_LANG`, `RF_SHOT_DIR`,
 ## Development
 
 ```bash
-test/run.sh          the whole suite, one line per case
-overlay/build.sh     rebuild the Swift overlay
+test/run.sh              the whole suite, one line per case
+overlay/build.sh         rebuild the Swift overlay
+overlay/build.sh --probes  the variant the test suite drives
 ```
+
+The overlay is one Swift file per type, compiled by a single `swiftc`
+call over `overlay/`. The selftest probes the suite drives are compiled
+out of the binary you install, so `RF_OVERLAY_SELFTEST` reaches nothing
+in a shipped build.
 
 The tests drive the real ffmpeg, whisper-cli, screencapture and AppKit
 rather than mocking them, using `RF_FFMPEG_INPUT` and a `say` fixture so
