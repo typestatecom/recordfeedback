@@ -33,5 +33,10 @@ assert_file() {
 }
 
 assert_eq() {
-  [ "$1" = "$2" ] || fail "${3:-values differ}: expected '$2', got '$1'"
+  # The comparison goes first. The message is usually several lines of context
+  # ending in a dump of what the probe said, and appending the comparison after
+  # that reads as though it belongs to the last line of the dump, which sent a
+  # reader chasing an assertion that had passed.
+  [ "$1" = "$2" ] || fail "expected '$2', got '$1'
+${3:-values differ}"
 }
