@@ -468,3 +468,26 @@ that changes it strands the caller as well as the session.
 
 What it costs: a stop can now succeed while producing a document with no
 words in it, so the message that says why has to be read.
+
+## 2026-08-24 The settings window is opened by a test, not only by a user
+
+The window that binds the keys is the only part of this tool a user has
+to find on their own, and it was written without ever being opened. That
+is exactly the kind of code that fails the first time somebody reaches
+for it, and two things did.
+
+Its rows were laid out from `window.frame.height`, which counts the title
+bar, so the heading was drawn above the top edge. And it opened
+underneath the palette, which sits above everything else on the screen
+and is where the window is opened from, so the row covered the last
+shortcut and the way back to the defaults.
+
+`21-settings-window` opens it, reads the buttons out of it, and checks
+that every row is inside the window and that the window is above the
+palette. The probe also writes what it rendered, though `cacheDisplay`
+draws these controls without their text, so the honest witness for the
+look is a real screenshot and the probe is the witness for the layout.
+
+What it costs: a test hook that opens a window, and a window at a level
+above the palette, which means it also floats over other applications
+while a session is running.

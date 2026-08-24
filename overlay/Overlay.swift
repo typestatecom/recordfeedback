@@ -481,6 +481,11 @@ final class SettingsWindow: NSWindowController {
                           defer: false)
     window.title = "recordfeedback shortcuts"
     window.isReleasedWhenClosed = false
+    // Above the palette, which is above everything else on the screen and is
+    // where this window is opened from. Without this it comes up underneath
+    // the row that opened it, and the row covers the last shortcut and the way
+    // back to the defaults.
+    window.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
     super.init(window: window)
     build(in: window)
   }
@@ -495,7 +500,9 @@ final class SettingsWindow: NSWindowController {
 
   private func build(in window: NSWindow) {
     guard let content = window.contentView else { return }
-    var y = window.frame.height - 62
+    // The content view, not the window: the window is a title bar taller and
+    // laying out from its height puts the first row above the top edge.
+    var y = content.bounds.height - 56
 
     let heading = NSTextField(labelWithString:
       "These keys belong to recordfeedback for as long as a session is"
@@ -696,6 +703,11 @@ final class Overlay: NSObject, NSApplicationDelegate {
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "layout" {
       probeLayout()
+    }
+    // Opens the settings window, because a window written blind is a window
+    // that crashes the first time somebody reaches for it.
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "settings" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.probeSettings() }
     }
     // Presses the stop button, with nothing at all watching for the answer.
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "rescue" {
@@ -2053,6 +2065,37 @@ final class Overlay: NSObject, NSApplicationDelegate {
                    "top \(Int(top))", "bottom \(Int(bottom))"]
       try? (lines.joined(separator: "\n") + "\n")
         .write(toFile: self.session + "/width.probe", atomically: true,
+               encoding: .utf8)
+    }
+  }
+
+  private func probeSettings() {
+    openSettings()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+      guard let window = self.settingsWindow?.window else {
+        try? "opened 0\n".write(toFile: self.session + "/settings.probe",
+                                atomically: true, encoding: .utf8)
+        return
+      }
+      let buttons = window.contentView?.subviews.compactMap { $0 as? NSButton } ?? []
+      var lines = ["opened \(window.isVisible ? 1 : 0)",
+                   "buttons \(buttons.count)",
+                   "titles " + buttons.map { $0.title }.joined(separator: ","),
+                   "level \(window.level.rawValue)",
+                   "palette-level \(self.paletteWindow?.level.rawValue ?? 0)",
+                   "over-palette "
+                     + "\((self.paletteWindow.map { window.frame.intersects($0.frame) } ?? false) ? 1 : 0)"]
+      if let view = window.contentView,
+         let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let png = rep.representation(using: .png, properties: [:]) {
+          try? png.write(to: URL(fileURLWithPath: self.session + "/settings.png"))
+        }
+      }
+      lines.append("rows-outside "
+                   + "\((window.contentView?.subviews.filter { !window.contentView!.bounds.contains($0.frame) }.count) ?? -1)")
+      try? (lines.joined(separator: "\n") + "\n")
+        .write(toFile: self.session + "/settings.probe", atomically: true,
                encoding: .utf8)
     }
   }

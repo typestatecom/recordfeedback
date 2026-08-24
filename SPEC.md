@@ -308,6 +308,13 @@ macOS's own show and hide the Dock, which Carbon will not hand over. The
 cost of option and shift is the characters it types on a layout that has
 them, which is a trade the user makes knowingly and can undo by rebinding.
 
+The window is above the palette, which is above everything else on the
+screen and is where the window is opened from: underneath it, the row
+covers the last shortcut and the way back to the defaults.
+`21-settings-window` opens it and reads the controls out of it, because a
+window written without being opened is a window that fails the first time
+somebody reaches for it.
+
 A binding with no modifier is refused, because a bare letter registered
 globally is that letter taken away from the editor the user is talking
 about. So is a key outside the letters and digits, so that the file can
