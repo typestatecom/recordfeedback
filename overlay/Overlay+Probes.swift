@@ -398,6 +398,38 @@ extension Overlay {
 
   // Posting synthetic mouse events needs Accessibility, which cannot be granted
   // without a person, so the test drives the same three calls the mouse does.
+  // The documentation shots. Draws one of each mark over the backdrop and stays
+  // in draw mode with the palette up, so that what the README shows is the real
+  // overlay rather than a picture of one.
+  func probePoster() {
+    guard let screen = NSScreen.main else { return }
+    let size = screen.frame.size
+    setDrawing(true)
+
+    func stroke(_ points: [NSPoint], _ newTool: Tool, _ colour: Int, _ pen: CGFloat) {
+      tool = newTool
+      colorIndex = colour
+      width = pen
+      guard let first = points.first else { return }
+      beginStroke(at: first, screen: 0)
+      for point in points.dropFirst() { extendStroke(to: point) }
+      endStroke(at: points.last!)
+    }
+
+    // An arrow at the row a person would be talking about, a box round the
+    // heading, and a highlighter under the button they mean.
+    stroke([NSPoint(x: size.width * 0.90, y: size.height * 0.42),
+            NSPoint(x: size.width * 0.795, y: size.height * 0.545)], .arrow, 0, 8)
+    stroke([NSPoint(x: size.width * 0.17, y: size.height * 0.70),
+            NSPoint(x: size.width * 0.38, y: size.height * 0.77)], .rect, 2, 6)
+    stroke([NSPoint(x: size.width * 0.755, y: size.height * 0.218),
+            NSPoint(x: size.width * 0.826, y: size.height * 0.218)], .highlighter, 3, 30)
+
+    tool = .arrow
+    redrawMarks()
+    for view in markViews { view.display() }
+  }
+
   func drawSelfTestStroke() {
     guard let screen = NSScreen.main else { return }
     let size = screen.frame.size

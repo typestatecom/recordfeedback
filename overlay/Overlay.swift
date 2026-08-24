@@ -103,6 +103,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "capture-twice" {
       probeDoubleCapture()
     }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "poster" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.probePoster() }
+    }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "layout" {
       probeLayout()
     }

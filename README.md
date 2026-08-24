@@ -16,6 +16,13 @@ screenshot without the sentence that goes with it is a puzzle.
 Everything runs on your machine. Audio is transcribed locally with
 whisper.cpp and nothing is uploaded.
 
+![Drawing on the screen during a session, with the palette along the bottom](docs/screenshots/annotating.png)
+
+Above: a session in progress. The arrow, the box and the highlighter are
+drawn straight on the screen over whatever application is in front, so
+they are inside the screenshot rather than notes attached to it. The
+palette along the bottom is the whole interface.
+
 ## What comes out
 
 ```markdown
@@ -58,7 +65,7 @@ rather trade accuracy for speed.
 ## Install
 
 ```bash
-git clone https://github.com/lutfidemirci/recordfeedback.git
+git clone https://github.com/typestatecom/recordfeedback.git
 cd recordfeedback
 ./install.sh
 recordfeedback doctor
@@ -109,6 +116,14 @@ In draw mode: `p` pen, `a` arrow, `r` rectangle, `h` highlighter, `t`
 text. `1` to `6` pick a colour, `[` and `]` change the width, `esc` or
 `Done` or the same tool again stops drawing. Change any of it with the
 gear in the palette or its menu bar item.
+
+![The palette: timer, tools, colours, width, capture, settings, shot count and stop](docs/screenshots/palette.png)
+
+Every key is written under the control it belongs to, so the palette is
+also the reminder. Left to right: how long the session has run, the five
+tools, the way out of draw mode, the six colours, the width, the two
+capture keys, the settings gear, how many screenshots you have taken,
+and stop.
 
 The marks are on the screen, so they are inside the image. A region
 capture crops the same marks.
@@ -177,6 +192,10 @@ The tests drive the real ffmpeg, whisper-cli, screencapture and AppKit
 rather than mocking them, using `RF_FFMPEG_INPUT` and a `say` fixture so
 no microphone and no person is needed. A test that mocks those tests
 nothing.
+
+`docs/screenshots/make.sh` rebuilds the images in this file. It puts a
+backdrop over every display first, so a shot never carries anything from
+the real desktop.
 
 - `SPEC.md` is the contract and holds the facts already checked.
 - `CLAUDE.md` is how to work in this repository.
