@@ -4,15 +4,11 @@
 # way, so it is proven here and not reasoned about.
 . "$REPO/test/lib.sh"
 
-OVERLAY="$REPO/bin/rf-overlay"
+OVERLAY="$(probe_overlay)" \
+  || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
 
 command -v screencapture > /dev/null 2>&1 || skip "no screencapture on this machine"
 command -v uv > /dev/null 2>&1 || skip "no uv, so pillow cannot count the pixels"
-
-if [ ! -x "$OVERLAY" ]; then
-  "$REPO/overlay/build.sh" > "$RF_CASE_TMP/build.log" 2>&1 \
-    || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
-fi
 
 # A headless runner has no window server, so the whole case is meaningless
 # rather than failing.

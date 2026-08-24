@@ -529,3 +529,26 @@ ten, only ever while somebody was at the keyboard, and the failure named
 a screenshot that had in fact been taken. The cost is that the probe no
 longer says anything about draw mode after the capture, which no case
 asks about.
+
+## 2026-08-24 The overlay is one file per type, and the controller one per section
+
+`overlay/*.swift`, compiled by a single `swiftc` call over the whole folder
+so a new file cannot be left out of the build. The controller is split
+across `Overlay+*.swift` extensions, which forces its members from
+`private` to internal, because Swift scopes `private` to one file. The
+binary is a single module with nothing else in it, so internal is as
+narrow as private was. The cost is that the compiler no longer stops a
+member being reached from a file that has no business with it.
+
+## 2026-08-24 The selftest probes are compiled out of the shipped binary
+
+`build.sh --probes` produces `bin/rf-overlay-probe` from the same sources
+with `-D RF_PROBES`, and the cases that drive a probe use it through
+`probe_overlay` in `test/lib.sh`. The binary a person installs carries no
+test scaffolding and no environment variable can reach a probe in it.
+The cost is real and worth stating: twelve cases now exercise a binary
+that differs from the shipped one by a compile flag, so a `#if RF_PROBES`
+that ever wraps more than a probe entry point would be tested and never
+shipped. Keep the guard around entry points only. The cases that drive
+the overlay without a probe, and `19-orphan-rescue` through the CLI, still
+run the real thing.

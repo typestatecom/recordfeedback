@@ -20,7 +20,10 @@ while [ -L "$SELF" ]; do
 done
 BIN_DIR="$(cd "$(dirname "$SELF")" && pwd)"
 REPO_DIR="$(cd "$BIN_DIR/.." && pwd)"
-OVERLAY_BIN="$BIN_DIR/rf-overlay"
+# Overridable so the test suite can point at the build that carries the selftest
+# probes. A session never sets it, and the probes are not in the shipped binary
+# to be reached anyway.
+OVERLAY_BIN="${RF_OVERLAY_BIN:-$BIN_DIR/rf-overlay}"
 
 CURRENT="$RF_HOME/current"
 

@@ -4,14 +4,10 @@
 # nothing in the session says it went missing.
 . "$REPO/test/lib.sh"
 
-OVERLAY="$REPO/bin/rf-overlay"
+OVERLAY="$(probe_overlay)" \
+  || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
 
 command -v screencapture > /dev/null 2>&1 || skip "no screencapture on this machine"
-
-if [ ! -x "$OVERLAY" ]; then
-  "$REPO/overlay/build.sh" > "$RF_CASE_TMP/build.log" 2>&1 \
-    || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
-fi
 
 probe="$RF_CASE_TMP/probe.png"
 screencapture -x "$probe" > /dev/null 2>&1 \

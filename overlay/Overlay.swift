@@ -83,6 +83,10 @@ final class Overlay: NSObject, NSApplicationDelegate {
       warn("four hours is the limit for one session, quitting.")
       NSApp.terminate(nil)
     }
+    #if RF_PROBES
+    // The probes are compiled in only for the test suite. A shipped binary
+    // carries no scaffolding and cannot be talked into a probe by an
+    // environment variable.
 
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "1" {
       drawSelfTestStroke()
@@ -126,6 +130,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "arrow" {
       probeArrow()
     }
+    #endif
     buildStatusItem()
 
     // Written last, so a test that waits for it knows the windows are up.

@@ -3,6 +3,7 @@
 import Cocoa
 import Carbon.HIToolbox
 
+#if RF_PROBES
 extension Overlay {
   // MARK: the palette probe
 
@@ -412,3 +413,4 @@ extension Overlay {
     for view in markViews { view.display() }
   }
 }
+#endif

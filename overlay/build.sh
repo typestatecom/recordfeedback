@@ -18,7 +18,18 @@ fi
 # person who added it.
 sources=("$REPO"/overlay/*.swift)
 
-swiftc -O -framework Cocoa -framework Carbon \
-  -o "$REPO/bin/rf-overlay" "${sources[@]}"
+# --probes builds the variant the test suite drives. It is the same sources with
+# the selftest entry points compiled in, under a different name so that the
+# binary a person installs never carries them and no environment variable can
+# reach them.
+out="$REPO/bin/rf-overlay"
+flags=()
+if [ "${1:-}" = "--probes" ]; then
+  out="$REPO/bin/rf-overlay-probe"
+  flags=(-D RF_PROBES)
+fi
 
-echo "built $REPO/bin/rf-overlay"
+swiftc -O -framework Cocoa -framework Carbon "${flags[@]+"${flags[@]}"}" \
+  -o "$out" "${sources[@]}"
+
+echo "built $out"

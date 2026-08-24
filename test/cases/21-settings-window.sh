@@ -4,12 +4,8 @@
 # whose shortcuts cannot be changed at all.
 . "$REPO/test/lib.sh"
 
-OVERLAY="$REPO/bin/rf-overlay"
-
-if [ ! -x "$OVERLAY" ]; then
-  "$REPO/overlay/build.sh" > "$RF_CASE_TMP/build.log" 2>&1 \
-    || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
-fi
+OVERLAY="$(probe_overlay)" \
+  || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
 
 probe="$RF_CASE_TMP/probe.png"
 screencapture -x "$probe" > /dev/null 2>&1 \

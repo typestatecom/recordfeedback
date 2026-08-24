@@ -4,12 +4,8 @@
 # to and runs backwards out of its own tail.
 . "$REPO/test/lib.sh"
 
-OVERLAY="$REPO/bin/rf-overlay"
-
-if [ ! -x "$OVERLAY" ]; then
-  "$REPO/overlay/build.sh" > "$RF_CASE_TMP/build.log" 2>&1 \
-    || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
-fi
+OVERLAY="$(probe_overlay)" \
+  || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
 
 session="$RF_HOME/sessions/arrow"
 mkdir -p "$session"

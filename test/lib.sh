@@ -40,3 +40,15 @@ assert_eq() {
   [ "$1" = "$2" ] || fail "expected '$2', got '$1'
 ${3:-values differ}"
 }
+
+# The probes are compiled out of the binary the tool ships, so a case that
+# drives one builds its own. Same sources, one flag apart, rebuilt whenever a
+# source is newer than it so a case never proves yesterday's code.
+probe_overlay() {
+  local binary="$REPO/bin/rf-overlay-probe"
+  if [ ! -x "$binary" ] \
+     || [ -n "$(find "$REPO/overlay" -name '*.swift' -newer "$binary" 2>/dev/null)" ]; then
+    "$REPO/overlay/build.sh" --probes > "$RF_CASE_TMP/build.log" 2>&1 || return 1
+  fi
+  printf '%s\n' "$binary"
+}
