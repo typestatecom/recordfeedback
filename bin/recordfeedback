@@ -362,12 +362,6 @@ stop_recorder() {
 # The shortcuts are settings, so the overlay is the only thing that knows what
 # they currently are. A second copy of the list in here is a copy that goes
 # stale the first time anybody rebinds one.
-hotkey() {
-  local action="$1"
-  [ -x "$OVERLAY_BIN" ] || return 1
-  "$OVERLAY_BIN" --print-keys 2>/dev/null | sed -n "s/^$action //p"
-}
-
 print_hotkeys() {
   local keys
   keys="$("$OVERLAY_BIN" --print-keys 2>/dev/null)" || keys=""
@@ -854,12 +848,10 @@ for segment in segments:
     if paragraphs and not start_new:
         start_new = any(paragraphs[-1]["offset"] <= x < offset for x in shot_offsets)
     if start_new:
-        paragraphs.append({"offset": offset, "text": text, "words": len(text.split()),
-                           "last_segment": segment})
+        paragraphs.append({"offset": offset, "text": text, "words": len(text.split())})
     else:
         paragraphs[-1]["text"] += " " + text
         paragraphs[-1]["words"] += len(text.split())
-    paragraphs[-1]["last_segment"] = segment
 
 # A screenshot belongs after the segment that was being spoken when it was
 # taken, which is the last segment starting at or before it. One taken before
