@@ -638,6 +638,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
   private var startedAt = Date()
   private var pulseOn = true
   private var shots = 0
+  // The highest shot number handed out, which is ahead of what is on disk for
+  // as long as screencapture takes to write.
+  private var reservedShots = 0
   private var shutterFlash = false
   private var keyMonitor: Any?
   private var statusItem: NSStatusItem?
@@ -700,6 +703,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "capture" {
       probeCapture()
+    }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "capture-twice" {
+      probeDoubleCapture()
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "layout" {
       probeLayout()
@@ -1712,10 +1718,18 @@ final class Overlay: NSObject, NSApplicationDelegate {
     let wasVisible = paletteWindow?.isVisible ?? false
     paletteWindow?.orderOut(nil)
 
+    // The name is taken now rather than inside the wait below. screencapture
+    // does not write the file until a second or more later, so two presses
+    // inside that window both counted the same empty folder, took the same
+    // name, and the second shot replaced the first without saying so. Counting
+    // the folder as well as the reservation is what lets a rescued overlay
+    // carry on from the files a previous one left.
+    reservedShots = max(reservedShots, countShots()) + 1
+    let name = String(format: "shot-%03d.png", reservedShots)
+
     // The window server needs a moment to drop the panel out of the composite,
     // and without the wait the palette lands in the file it was hidden for.
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-      let name = String(format: "shot-%03d.png", self.countShots() + 1)
       let path = self.inbox + "/" + name
       let task = Process()
       task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
@@ -1925,6 +1939,27 @@ final class Overlay: NSObject, NSApplicationDelegate {
         self.setDrawing(false)
         try? (lines.joined(separator: "\n") + "\n")
           .write(toFile: self.session + "/capture.probe", atomically: true,
+                 encoding: .utf8)
+      }
+    }
+  }
+
+  // Two presses inside the second that screencapture takes are what a person
+  // does when the first one is silent, which is exactly what -x makes it.
+  private func probeDoubleCapture() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+      self.capture(region: false)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+        self.capture(region: false)
+      }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: self.inbox))
+          ?? []
+        let lines = ["files " + names.filter { !$0.hasPrefix(".") }.sorted()
+                       .joined(separator: " "),
+                     "shots \(self.shots)"]
+        try? (lines.joined(separator: "\n") + "\n")
+          .write(toFile: self.session + "/double.probe", atomically: true,
                  encoding: .utf8)
       }
     }
