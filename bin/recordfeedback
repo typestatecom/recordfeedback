@@ -24,6 +24,11 @@ OVERLAY_BIN="$BIN_DIR/rf-overlay"
 
 CURRENT="$RF_HOME/current"
 
+# What counts as a screenshot. One list, because a format added to only some
+# of the places that look for shots goes missing between status and collect.
+IMAGE_NAMES=( \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' \
+                 -o -iname '*.gif' -o -iname '*.tiff' -o -iname '*.heic' \) )
+
 # ---------------------------------------------------------------- diagnostics
 
 # A failure prints what failed, the command behind it and the way out, because
@@ -38,6 +43,8 @@ die() {
 }
 
 DESKTOP_HINT='Open System Settings, Privacy and Security, Files and Folders, find the terminal application Claude Code runs in, and turn on Desktop Folder. Full Disk Access for the same application works too. macOS asks once and remembers a refusal.'
+
+SCREEN_HINT='Open System Settings, Privacy and Security, Screen and System Audio Recording, turn on the terminal application Claude Code runs in, and quit and reopen it. macOS does not apply the change to a running process.'
 
 MIC_HINT='the terminal application needs Microphone permission in System Settings, Privacy and Security, Microphone. macOS asks once, and if the prompt was refused the switch has to be turned on by hand.'
 
@@ -214,6 +221,13 @@ cmd_doctor() {
 
   if [ -x "$OVERLAY_BIN" ]; then
     check ok "overlay" "$OVERLAY_BIN"
+    # Denied, screencapture still writes a file and the file is only the
+    # wallpaper, so this failure is invisible until the shots are read.
+    if "$OVERLAY_BIN" --check-capture > /dev/null 2>&1; then
+      check ok "screen recording" "screenshots will contain your windows"
+    else
+      check fail "screen recording" "macOS is not letting this terminal record the screen, so every screenshot would be the wallpaper and nothing else. $SCREEN_HINT"
+    fi
   else
     check warn "overlay" "not built. Run $REPO_DIR/overlay/build.sh. Recording works without it, annotations do not."
   fi
@@ -411,8 +425,9 @@ cmd_start() {
 
   echo "Recording. Talk, and draw on the screen with the hotkeys below."
   if [ "$no_overlay" -eq 0 ] && [ -x "$OVERLAY_BIN" ]; then
-    echo "  opt-cmd-D draw, opt-cmd-Z undo, opt-cmd-C clear, opt-cmd-H hide, opt-cmd-S stop"
-    echo "  shift-cmd-4 takes a screenshot with your marks in it"
+    echo "  opt-cmd-A draw, opt-cmd-X screenshot, opt-cmd-R region, opt-cmd-S stop"
+    echo "  opt-cmd-Z undo, opt-cmd-C clear, opt-cmd-H hide the marks"
+    echo "  in draw mode: p a r h t tools, 1 to 6 colours, [ ] width, esc to leave"
   else
     echo "  no overlay, so no annotations. shift-cmd-4 still takes screenshots."
   fi
@@ -438,7 +453,7 @@ cmd_status() {
   echo "Recording for $(format_mmss "$secs")."
   echo "  session: $session"
   echo "  audio:   $(format_mmss $((recorded / 1000000))) captured"
-  echo "  shots:   $shots so far in $(shot_dir)"
+  echo "  shots:   $shots so far"
   local note
   note="$(jq -r '.note // ""' "$session/meta.json")"
   [ -n "$note" ] && echo "  note:    $note"
@@ -449,12 +464,20 @@ cmd_status() {
 # stop.ref yet, so it counts everything newer than start.ref.
 count_new_shots() {
   local session="$1"
-  local dir
+  local dir inbox=0 folder=0
   dir="$(shot_dir)"
-  [ -d "$dir" ] || { echo 0; return 0; }
-  { find "$dir" -maxdepth 1 -type f -newer "$session/start.ref" \
-      \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.tiff' -o -iname '*.heic' \) \
-      ! -name '.*' 2>/dev/null || true; } | wc -l | tr -d ' '
+  # The overlay captures into the session inbox, so a count that reads only the
+  # screenshot folder tells a person who just pressed the capture key that
+  # nothing happened.
+  if [ -d "$session/inbox" ]; then
+    inbox="$({ find "$session/inbox" -maxdepth 1 -type f "${IMAGE_NAMES[@]}" \
+        ! -name '.*' 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  fi
+  if [ -d "$dir" ]; then
+    folder="$({ find "$dir" -maxdepth 1 -type f -newer "$session/start.ref" \
+        "${IMAGE_NAMES[@]}" ! -name '.*' 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  fi
+  echo $((inbox + folder))
 }
 
 # ----------------------------------------------------------------------- abort
@@ -527,8 +550,7 @@ cmd_collect() {
   # screenshot folder. Those shots are always ours, whatever their timestamp.
   local listing="$session/.shot-list"
   : > "$listing"
-  { find "$session/inbox" -maxdepth 1 -type f \
-      \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.tiff' -o -iname '*.heic' \) \
+  { find "$session/inbox" -maxdepth 1 -type f "${IMAGE_NAMES[@]}" \
       ! -name '.*' 2>/dev/null || true; } | while IFS= read -r f; do
     [ -n "$f" ] && printf '%s\toverlay\t%s\n' "$(stat -f %Fm "$f")" "$f" >> "$listing"
   done
@@ -538,8 +560,7 @@ cmd_collect() {
   if [ -d "$dir" ]; then
     { find "$dir" -maxdepth 1 -type f \
         -newer "$session/start.ref" ! -newer "$session/stop.ref" \
-        \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.gif' -o -iname '*.tiff' -o -iname '*.heic' \) \
-        ! -name '.*' 2>/dev/null || true; } | while IFS= read -r f; do
+        "${IMAGE_NAMES[@]}" ! -name '.*' 2>/dev/null || true; } | while IFS= read -r f; do
       [ -n "$f" ] && printf '%s\tfolder\t%s\n' "$(stat -f %Fm "$f")" "$f" >> "$listing"
     done
   fi

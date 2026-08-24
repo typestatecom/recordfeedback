@@ -151,3 +151,42 @@ palette in the picture.
 
 `⌥⌘D` from the spec was macOS's own show and hide the Dock, which Carbon
 refuses to register, so draw mode moved to `⌥⌘A`.
+
+## 2026-08-24 The pixel test drives the drawing code, not synthetic events
+
+The spec asked for the composite proof to be driven by synthetic mouse
+events. Posting those needs Accessibility permission, which cannot be
+granted without a person clicking a switch, so a test that needs it is a
+test that never runs. `RF_OVERLAY_SELFTEST=1` instead calls the same
+`beginStroke`, `extendStroke` and `endStroke` the mouse handler calls,
+and the case then asserts on real pixels out of a real `screencapture`.
+
+What it costs: the delivery of the mouse event itself is not covered, so
+a broken `mouseDown` would not be caught here. Everything the proof was
+about, that an overlay window at `.statusBar` level lands in the
+composite, is covered. Measured on this machine the stroke adds 127124
+red pixels, and with the stroke removed it adds 1220, so the case
+separates the two answers by two orders of magnitude.
+
+## 2026-08-24 doctor asks macOS about Screen Recording instead of guessing
+
+Without Screen Recording permission `screencapture` still exits zero and
+still writes a PNG. The PNG is the wallpaper with no windows in it. That
+is the one failure that looks like success all the way to the point where
+a person reads `feedback.md` and finds pictures of nothing. The overlay
+binary answers `--check-capture` with `CGPreflightScreenCaptureAccess`,
+and `doctor` reports it as its own line.
+
+What it costs: `doctor` now depends on the overlay being built for that
+one check. It says so rather than staying quiet when it is not.
+
+## 2026-08-24 One list of screenshot extensions
+
+`status` counted only the screenshot folder while `collect` counted the
+folder and the overlay's inbox, so a person who pressed `⌥⌘X` three times
+was told zero shots had been taken. Both now read `IMAGE_NAMES`, and the
+status line stopped naming one folder while counting two places.
+
+What it costs: a global array in a shell script. The alternative was the
+extension list written out a third time, which is how the two counts
+drifted apart in the first place.
