@@ -491,3 +491,19 @@ look is a real screenshot and the probe is the witness for the layout.
 What it costs: a test hook that opens a window, and a window at a level
 above the palette, which means it also floats over other applications
 while a session is running.
+
+## 2026-08-24 The drift check judges three windows, not one
+
+`02-record-duration` measured the recorder over a single six second window and
+failed the whole suite at 0.9215 seconds of audio per second, then passed on
+its own. That is the fixture and not the tool: `-re` paces itself off the CPU
+clock, so one scheduling stall while the suite is running overlays and
+screencaptures reads as several percent of drift. A real microphone is clocked
+by the audio device and cannot lag that way.
+
+It now takes three windows and judges the middle one. Drift that is real is in
+every window and moves the middle; a stall is in one and does not. The failure
+prints all three, so a genuine drift can be told apart from a noisy machine
+without rerunning anything.
+
+What it costs: the case takes fourteen seconds instead of eight.

@@ -17,10 +17,20 @@ assert_file "$session/ffmpeg.pid"
 note="$(jq -r .note "$session/meta.json")"
 assert_eq "$note" "duration check" "meta.json note"
 
+# Three windows rather than one, and the middle result is the one judged. The
+# fixture's -re paces itself off the CPU clock, so one scheduling stall inside a
+# single window reads as several percent of drift while the suite is busy. A
+# real microphone is clocked by the audio device and cannot lag that way, so a
+# stall here is the fixture and not the tool. Drift that is real is in every
+# window and moves the middle one.
 sample() { grep -a '^out_time_us=' "$session/ffmpeg.progress" | tail -n 1 | cut -d= -f2; }
-r1="$(sample)"; t1="$(python3 -c 'import time;print(time.time())')"
-sleep 6
-r2="$(sample)"; t2="$(python3 -c 'import time;print(time.time())')"
+rates=""
+for _ in 1 2 3; do
+  r1="$(sample)"; t1="$(python3 -c 'import time;print(time.time())')"
+  sleep 4
+  r2="$(sample)"; t2="$(python3 -c 'import time;print(time.time())')"
+  rates="$rates $(python3 -c "print((int('$r2') - int('$r1')) / 1e6 / (float('$t2') - float('$t1')))")"
+done
 
 st="$("$RFB" status)"
 echo "$st"
@@ -40,14 +50,19 @@ duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$session
 
 python3 - <<PY
 w = float("$window"); d = float("$duration")
-rate = (int("$r2") - int("$r1")) / 1e6 / (float("$t2") - float("$t1"))
-print("window=%.3f duration=%.3f offset=%+.3f rate=%.4f" % (w, d, d - w, rate))
+rates = sorted(float(one) for one in "$rates".split())
+rate = rates[len(rates) // 2]
+print("window=%.3f duration=%.3f offset=%+.3f rates=%s middle=%.4f"
+      % (w, d, d - w, " ".join("%.4f" % one for one in rates), rate))
 
 # The property that matters is that a second of talking becomes a second of
 # audio. Both the real input and the synthetic one carry a fixed startup
 # offset of about half a second, which says nothing about drift.
 if abs(rate - 1.0) > 0.02:
-    raise SystemExit("the recorder is not running in real time: %.4f seconds of audio per second" % rate)
+    raise SystemExit(
+        "the recorder is not running in real time: %.4f seconds of audio per"
+        " second, across windows of %s"
+        % (rate, " ".join("%.4f" % one for one in rates)))
 if abs(d - w) > 1.0:
     raise SystemExit("audio duration %.3f does not cover the session window %.3f" % (d, w))
 PY

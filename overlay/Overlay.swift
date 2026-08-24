@@ -709,6 +709,12 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "settings" {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.probeSettings() }
     }
+    // Rebinds a key the way the settings window does, because saving a
+    // shortcut and having it take effect is the whole point of that window and
+    // none of it is reached by opening one.
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "rebind" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.probeRebind() }
+    }
     // Presses the stop button, with nothing at all watching for the answer.
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "rescue" {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.stopSession() }
@@ -2098,6 +2104,45 @@ final class Overlay: NSObject, NSApplicationDelegate {
         .write(toFile: self.session + "/settings.probe", atomically: true,
                encoding: .utf8)
     }
+  }
+
+  private func probeRebind() {
+    var lines: [String] = []
+    lines.append("before " + Settings.shared.shortcut(.draw).plain)
+
+    // The one the settings window refuses: a combination another action holds.
+    let taken = Settings.shared.shortcut(.clear)
+    lines.append("conflict "
+                 + (Settings.shared.conflict(taken, ignoring: .draw)?.rawValue ?? "none"))
+    // And the one it allows: an action asked to keep what it already has.
+    lines.append("self-conflict "
+                 + (Settings.shared.conflict(Settings.shared.shortcut(.draw),
+                                             ignoring: .draw)?.rawValue ?? "none"))
+
+    let wanted = Shortcut(keyCode: kVK_ANSI_J, option: false, shift: true,
+                          command: true, control: false)
+    Settings.shared.set(.draw, to: wanted)
+    reinstallHotkeys()
+    lines.append("after " + Settings.shared.shortcut(.draw).plain)
+    lines.append("shown " + Settings.shared.shortcut(.draw).display)
+    lines.append("saved "
+                 + (FileManager.default.fileExists(atPath: Settings.shared.path) ? "1" : "0"))
+
+    // The row reads the binding rather than keeping its own copy of it.
+    paletteView?.display()
+    lines.append("tips " + (paletteView?.tipTexts.joined(separator: ", ") ?? ""))
+
+    // Reloading from disk has to give back what was written, or the binding
+    // lasts only as long as this process does.
+    Settings.shared.load()
+    lines.append("reloaded " + Settings.shared.shortcut(.draw).plain)
+    lines.append("untouched " + Settings.shared.shortcut(.stop).plain)
+
+    Settings.shared.reset()
+    lines.append("reset " + Settings.shared.shortcut(.draw).plain)
+
+    try? (lines.joined(separator: "\n") + "\n")
+      .write(toFile: session + "/rebind.probe", atomically: true, encoding: .utf8)
   }
 
   // A wide arrow is the shape most easily got wrong, because everything about

@@ -84,3 +84,79 @@ $contents"
 $contents"
 
 echo "the settings window opens with a control for every shortcut"
+
+# --- binding a key, which is what the window exists to do and what opening one
+# does not reach.
+session2="$RF_HOME/sessions/rebind"
+mkdir -p "$session2"
+touch "$session2/start.ref"
+
+RF_SESSION="$session2" RF_OVERLAY_SELFTEST=rebind "$OVERLAY" \
+  > "$RF_CASE_TMP/rebind.log" 2>&1 &
+rebind_pid=$!
+# shellcheck disable=SC2064
+trap "kill -TERM $rebind_pid 2>/dev/null || true" EXIT
+
+report2="$session2/rebind.probe"
+waited=0
+while [ ! -f "$report2" ]; do
+  kill -0 "$rebind_pid" 2>/dev/null || fail "the overlay died rebinding a key:
+$(cat "$RF_CASE_TMP/rebind.log")"
+  sleep 0.2
+  waited=$((waited + 1))
+  [ "$waited" -lt 100 ] || fail "the rebind probe never reported:
+$(cat "$RF_CASE_TMP/rebind.log")"
+done
+
+kill -TERM "$rebind_pid" 2>/dev/null || true
+trap - EXIT
+
+r="$(cat "$report2")"
+rfield() { printf '%s\n' "$r" | sed -n "s/^$1 //p"; }
+
+assert_eq "$(rfield conflict)" "clear" \
+  "a combination another action already holds is reported as taken, and named,
+  so the window can say which one rather than binding a key that silently
+  shadows another. The probe said:
+$r"
+
+assert_eq "$(rfield self-conflict)" "none" \
+  "an action keeping the combination it already has is not a conflict with
+  itself, or no shortcut could ever be confirmed. The probe said:
+$r"
+
+assert_eq "$(rfield after)" "shift-cmd-J" \
+  "the binding takes effect in the running overlay, without ending the session
+  the user is in the middle of. The probe said:
+$r"
+
+assert_eq "$(rfield shown)" "⇧⌘J" \
+  "and it is written the way macOS writes a key, so what the row shows is what
+  the user reads anywhere else. The probe said:
+$r"
+
+assert_contains "$(rfield tips)" "shift-cmd-J" \
+  "the row shows the new binding rather than a copy of the old one. A settings
+  window whose result is not on the screen is a window nobody can trust. The
+  probe said:
+$r"
+
+assert_eq "$(rfield saved)" "1" \
+  "the binding is written to disk. The probe said:
+$r"
+
+assert_eq "$(rfield reloaded)" "shift-cmd-J" \
+  "and reading it back gives what was written, or the binding lasts only as
+  long as the process that made it. The probe said:
+$r"
+
+assert_eq "$(rfield untouched)" "opt-shift-S" \
+  "rebinding one key leaves every other one alone. The probe said:
+$r"
+
+assert_eq "$(rfield reset)" "opt-shift-D" \
+  "restoring the defaults gives the defaults back, which is the only way out
+  for a user who has bound a key they cannot press. The probe said:
+$r"
+
+echo "a rebound key is saved, reloaded, re-registered and shown in the row"
