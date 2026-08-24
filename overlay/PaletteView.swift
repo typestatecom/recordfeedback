@@ -99,12 +99,21 @@ final class PaletteView: NSView, NSViewToolTipOwner {
     return ""
   }
 
-  override func mouseDown(with event: NSEvent) {
-    let point = convert(event.locationInWindow, from: nil)
+  // Separate from mouseDown so that a probe can press a control without the
+  // Accessibility permission a synthetic click needs, and press exactly what a
+  // click would press rather than a copy of the same search.
+  @discardableResult
+  func press(at point: NSPoint) -> Bool {
     for (rect, action) in hits where rect.contains(point) {
       action()
-      return
+      return true
     }
+    return false
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let point = convert(event.locationInWindow, from: nil)
+    if press(at: point) { return }
     // Not on a control, so this is the grab handle for the whole panel.
     dragOrigin = event.locationInWindow
   }

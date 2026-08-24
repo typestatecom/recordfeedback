@@ -66,6 +66,20 @@ extension Overlay {
             weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
       x += 62
 
+      // The other way back out of a mistake. It was a key and nothing else, and
+      // a key that appears nowhere on the screen is one the person who bound it
+      // still goes hunting for.
+      let clearKey = Settings.shared.shortcut(.clear)
+      let wipe = NSRect(x: x, y: mid - 15, width: 56, height: 30)
+      control(wipe, in: view, on: false, key: clearKey.display,
+              tip: "clear the marks (" + clearKey.plain + ")") {
+        [weak self] in self?.clear()
+      }
+      label("Clear", at: NSPoint(x: wipe.midX - 18, y: mid - 7), size: 13,
+            weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
+      view.name("clear", wipe)
+      x += 62
+
       separator(at: x, middle: mid); x += 13
 
       for (index, colour) in palette.enumerated() {

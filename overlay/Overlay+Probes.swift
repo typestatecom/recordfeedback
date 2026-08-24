@@ -430,6 +430,33 @@ extension Overlay {
     for view in markViews { view.display() }
   }
 
+  // The clear key is the one a person goes looking for and does not find, so
+  // the palette has to carry it as a control. This presses that control the way
+  // a click does and checks the marks actually go.
+  func probeClearButton() {
+    setDrawing(true)
+    tool = .pen
+    beginStroke(at: NSPoint(x: 200, y: 200), screen: 0)
+    extendStroke(to: NSPoint(x: 400, y: 300))
+    endStroke(at: NSPoint(x: 400, y: 300))
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+      guard let view = self.paletteView else { return }
+      view.display()
+      var lines = ["shapes-before \(self.shapes.count)"]
+      if let rect = view.namedRects["clear"] {
+        lines.append("named 1")
+        view.press(at: NSPoint(x: rect.midX, y: rect.midY))
+      } else {
+        lines.append("named 0")
+      }
+      lines.append("shapes-after \(self.shapes.count)")
+      self.setDrawing(false)
+      try? (lines.joined(separator: "\n") + "\n")
+        .write(toFile: self.session + "/clear.probe", atomically: true,
+               encoding: .utf8)
+    }
+  }
+
   func drawSelfTestStroke() {
     guard let screen = NSScreen.main else { return }
     let size = screen.frame.size

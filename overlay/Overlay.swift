@@ -103,6 +103,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "capture-twice" {
       probeDoubleCapture()
     }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "clearbutton" {
+      probeClearButton()
+    }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "poster" {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { self.probePoster() }
     }
@@ -194,7 +197,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
   let anchoredControls = ["shots", "region", "camera", "stop"]
 
   let paletteHeight: CGFloat = 52
-  var paletteWidth: CGFloat { drawing ? 894 : 446 }
+  var paletteWidth: CGFloat { drawing ? 956 : 446 }
 
   func buildPalette() {
     // The idle width. The tools, the colours and the width control belong to
