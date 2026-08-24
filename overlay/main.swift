@@ -1,0 +1,31 @@
+// The entry point. Swift allows top level statements in main.swift and
+// nowhere else, so the process starts here and the controller lives in
+// Overlay.swift.
+import Cocoa
+import Carbon.HIToolbox
+
+// Screen Recording is the permission that breaks this tool silently: without it
+// screencapture still writes a file and the file is only the wallpaper. doctor
+// asks here rather than guessing from the pixels of a shot.
+// The CLI prints the key list at the start of every session, and a second copy
+// of it in the shell script is a copy that goes stale the first time anybody
+// rebinds one. It asks the overlay instead.
+if CommandLine.arguments.contains("--print-keys") {
+  for action in Action.allCases {
+    print(action.rawValue + " " + Settings.shared.shortcut(action).plain)
+  }
+  exit(0)
+}
+if CommandLine.arguments.contains("--check-capture") {
+  exit(CGPreflightScreenCaptureAccess() ? 0 : 1)
+}
+if CommandLine.arguments.contains("--request-capture") {
+  CGRequestScreenCaptureAccess()
+  exit(0)
+}
+
+let application = NSApplication.shared
+let controller = Overlay()
+application.delegate = controller
+application.setActivationPolicy(.accessory)
+application.run()

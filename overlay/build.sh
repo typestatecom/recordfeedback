@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds the annotation overlay. One file, one swiftc call, no Xcode project.
+# Builds the annotation overlay. Every .swift in this folder, one swiftc call,
+# no Xcode project.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,7 +13,12 @@ if ! command -v swiftc > /dev/null 2>&1; then
   exit 1
 fi
 
+# The whole folder rather than a list: a file added to the overlay and left out
+# of the build fails at the first call into it, which is a long way from the
+# person who added it.
+sources=("$REPO"/overlay/*.swift)
+
 swiftc -O -framework Cocoa -framework Carbon \
-  -o "$REPO/bin/rf-overlay" "$REPO/overlay/Overlay.swift"
+  -o "$REPO/bin/rf-overlay" "${sources[@]}"
 
 echo "built $REPO/bin/rf-overlay"
