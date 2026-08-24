@@ -283,3 +283,57 @@ the colour step to 26.
 
 What it costs: another test hook, and a window 120 points wider on the
 screen for the whole session.
+
+## 2026-08-24 The marks are the user's work, not the tool's furniture
+
+Leaving draw mode hides the application to give the keyboard back to
+whatever is underneath. The palette was already exempt from that with
+`canHide = false`, and the mark windows were not, so every mark the user
+had drawn came off the screen the moment they put the pen down. A user
+who circles something and then stops drawing to talk about it is left
+pointing at nothing.
+
+The same hiding took the shutter frame with it, so a screenshot taken
+outside draw mode had no confirmation at all. Both windows are now
+exempt. Hiding the application still deactivates it, which is the part
+that hands the keyboard back, so nothing was lost.
+
+What it costs: nothing on screen, and one more window the window server
+keeps composited while the session runs, which it was already doing for
+the whole of draw mode.
+
+## 2026-08-24 The shot confirmation is longer and repeated on the row
+
+The frame that says a screenshot was taken was up for 180ms, at the four
+edges of the screen, and it is drawn only after the file lands on disk so
+it can never appear in the shot it confirms. That leaves half a second in
+which a pressed key has done nothing visible. A session recorded against
+this tool holds four near identical shots taken across three seconds,
+with the user asking out loud whether the key had registered.
+
+The frame now holds for 350ms, and the camera button in the palette
+lights while it does. The row is where the eye that just clicked already
+is, and the palette is the one window that is never hidden.
+
+What it costs: the window in which the confirmation lands in a second
+shot doubles. A confirmation nobody catches is worth less.
+
+## 2026-08-24 The arrow is drawn to fit between its own two ends
+
+Every part of the arrow is sized from a width that is usually small, and
+at the wide end two things broke. The shaft was stroked to the tip with a
+round cap, so half a width of ink sat beyond the point the user dragged
+to: a blob hanging off the end. And the head was four widths long
+whatever the drag, so a short wide arrow had a head longer than itself,
+with the barbs running back out through the tail.
+
+The head is now clamped to the length of the drag, and the shaft is butt
+capped and stopped inside the head. `17-wide-arrow` renders arrows
+through the same code the screen uses and counts the ink outside the two
+points, because the fault is in the pixels and not in the numbers. The
+probes now also write what they rendered, so a broken assertion can be
+looked at.
+
+What it costs: a short drag at a wide setting is nearly all head, since
+staying inside the two ends wins over keeping the shaft. The tail is flat
+rather than rounded.

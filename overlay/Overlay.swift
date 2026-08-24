@@ -170,6 +170,10 @@ final class PaletteView: NSView, NSViewToolTipOwner {
   // another. A layout read off the source is a layout nobody laid out.
   var hitRects: [NSRect] { hits.map { $0.0 } }
 
+  // The label a control names itself with when the pointer rests on it. A
+  // control the row never names is a control only its author can find.
+  var tipTexts: [String] { tips.map { $0.1 } }
+
   func clearTips() { tips.removeAll() }
 
   func addTip(_ rect: NSRect, _ text: String) { tips.append((rect, text)) }
@@ -302,6 +306,15 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "layout" {
       probeLayout()
     }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "leave" {
+      probeLeave()
+    }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "width" {
+      probeWidth()
+    }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "arrow" {
+      probeArrow()
+    }
     // Written last, so a test that waits for it knows the windows are up.
     FileManager.default.createFile(atPath: session + "/overlay.ready", contents: nil)
   }
@@ -336,6 +349,12 @@ final class Overlay: NSObject, NSApplicationDelegate {
       window.level = .statusBar
       window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
       window.ignoresMouseEvents = !drawing
+      // Leaving draw mode hides the application to give the keyboard back, and
+      // a mark window that hides with it takes every mark the user drew off the
+      // screen. Putting the pen down is not rubbing the drawing out, and the
+      // shutter frame is drawn here too, so hiding these also leaves a capture
+      // taken outside draw mode with no confirmation at all.
+      window.canHide = false
 
       let view = MarkView(frame: NSRect(origin: .zero, size: screen.frame.size))
       view.index = index
@@ -601,11 +620,18 @@ final class Overlay: NSObject, NSApplicationDelegate {
     case kVK_ANSI_4: pick(3)
     case kVK_ANSI_5: pick(4)
     case kVK_ANSI_6: pick(5)
-    case kVK_ANSI_LeftBracket: width -= 2; paletteView?.needsDisplay = true
-    case kVK_ANSI_RightBracket: width += 2; paletteView?.needsDisplay = true
+    case kVK_ANSI_LeftBracket: widen(-1)
+    case kVK_ANSI_RightBracket: widen(+1)
     default: return false
     }
     return true
+  }
+
+  // One step of the width control, wherever it is asked for: the bracket keys
+  // and the two buttons in the palette have to agree on what a step is.
+  private func widen(_ steps: Int) {
+    width += 2 * CGFloat(steps)
+    paletteView?.needsDisplay = true
   }
 
   private func pick(_ index: Int) {
@@ -682,16 +708,28 @@ final class Overlay: NSObject, NSApplicationDelegate {
                          width: CGFloat, color: NSColor) {
     color.setStroke()
     color.setFill()
-    let shaft = NSBezierPath()
-    shaft.move(to: start)
-    shaft.line(to: end)
-    shaft.lineWidth = width
-    shaft.lineCapStyle = .round
-    shaft.stroke()
 
     let angle = atan2(end.y - start.y, end.x - start.x)
-    let length = max(14, width * 4)
+    let span = hypot(end.x - start.x, end.y - start.y)
+    // Every part of the arrow is sized from a width that is usually small. At
+    // the wide end a head of four widths is longer than a short drag, and the
+    // point of the arrow then sits outside the two ends the user dragged
+    // between, with the barbs running back out through the tail.
+    let length = min(max(14, width * 4), span)
     let spread = CGFloat.pi / 7
+
+    // Butt capped and stopped inside the head. A round cap carries half a
+    // width of ink past the tip, which at a wide setting is a blob hanging off
+    // the point, and half a width behind the tail.
+    let neck = NSPoint(x: end.x - length * 0.85 * cos(angle),
+                       y: end.y - length * 0.85 * sin(angle))
+    let shaft = NSBezierPath()
+    shaft.move(to: start)
+    shaft.line(to: neck)
+    shaft.lineWidth = width
+    shaft.lineCapStyle = .butt
+    shaft.stroke()
+
     let head = NSBezierPath()
     head.move(to: end)
     head.line(to: NSPoint(x: end.x - length * cos(angle - spread),
@@ -792,33 +830,31 @@ final class Overlay: NSObject, NSApplicationDelegate {
     separator(at: x, middle: middle); x += 11
 
     let thinner = NSRect(x: x, y: middle - 11, width: 22, height: 22)
-    button("-", in: thinner, view: view) { [weak self] in
-      self?.width -= 2
-      self?.paletteView?.needsDisplay = true
-    }
+    button("-", in: thinner, view: view) { [weak self] in self?.widen(-1) }
     x += 25
     label(String(format: "%.0f", width), at: NSPoint(x: x + 4, y: middle - 7),
           size: 12, weight: .medium, color: NSColor(white: 1, alpha: 0.85))
     x += 26
     let thicker = NSRect(x: x, y: middle - 11, width: 22, height: 22)
-    button("+", in: thicker, view: view) { [weak self] in
-      self?.width += 2
-      self?.paletteView?.needsDisplay = true
-    }
+    button("+", in: thicker, view: view) { [weak self] in self?.widen(+1) }
     x += 25
 
     x += 3
     separator(at: x, middle: middle); x += 11
 
+    // The frame that confirms a shot is drawn at the edges of the screen, and
+    // the eye of someone mid sentence is on neither edge. The row is where they
+    // last looked, so the confirmation is repeated on the control itself.
     let camera = NSRect(x: x, y: middle - 13, width: 30, height: 26)
-    NSColor(white: 1, alpha: 0.10).setFill()
+    if shutterFlash {
+      NSColor(srgbRed: 0.20, green: 0.50, blue: 1.0, alpha: 0.9).setFill()
+    } else {
+      NSColor(white: 1, alpha: 0.10).setFill()
+    }
     NSBezierPath(roundedRect: camera, xRadius: 6, yRadius: 6).fill()
-    NSColor(white: 1, alpha: 0.75).setStroke()
-    let lens = NSBezierPath(ovalIn: NSRect(x: camera.midX - 6, y: camera.midY - 6,
-                                           width: 12, height: 12))
-    lens.lineWidth = 1.5
-    lens.stroke()
+    drawCameraIcon(in: camera, color: NSColor(white: 1, alpha: 0.85))
     view.addHit(camera) { [weak self] in self?.capture(region: false) }
+    view.addTip(camera, "screenshot (opt-cmd-X)")
     x += 34
 
     label("\(shots)", at: NSPoint(x: x, y: middle - 7), size: 12,
@@ -839,6 +875,30 @@ final class Overlay: NSObject, NSApplicationDelegate {
       label("marks hidden", at: NSPoint(x: 12, y: 2), size: 9, weight: .regular,
             color: NSColor(white: 1, alpha: 0.6))
     }
+  }
+
+  // A ring on its own reads as a colour swatch, a record button or a full stop,
+  // which is every wrong guess at what this control does. The body and the bump
+  // are what make the ring a lens.
+  private func drawCameraIcon(in rect: NSRect, color: NSColor) {
+    let body = NSRect(x: rect.midX - 9, y: rect.midY - 6, width: 18, height: 13)
+    let bump = NSRect(x: rect.midX - 3.5, y: body.maxY - 1, width: 7, height: 3)
+    color.setFill()
+    let shell = NSBezierPath(roundedRect: body, xRadius: 2.5, yRadius: 2.5)
+    shell.append(NSBezierPath(roundedRect: bump, xRadius: 1, yRadius: 1))
+    shell.fill()
+
+    // Filled dark rather than left clear, so the lens reads the same over the
+    // plain button and over the blue one that confirms a shot.
+    let hole = NSBezierPath(ovalIn: NSRect(x: body.midX - 4, y: body.midY - 4,
+                                           width: 8, height: 8))
+    NSColor(srgbRed: 0.08, green: 0.08, blue: 0.09, alpha: 1).setFill()
+    hole.fill()
+    color.setStroke()
+    let ring = NSBezierPath(ovalIn: NSRect(x: body.midX - 2.5, y: body.midY - 2.5,
+                                           width: 5, height: 5))
+    ring.lineWidth = 1.5
+    ring.stroke()
   }
 
   private func button(_ text: String, in rect: NSRect, view: PaletteView,
@@ -981,12 +1041,19 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // and a silent capture is indistinguishable from a key that did nothing. The
   // frame is the confirmation, drawn after the file is on disk so that it can
   // never appear in the shot it is confirming.
+  //
+  // Long enough to be caught by someone who is talking rather than watching. A
+  // confirmation that is missed is a key pressed again, and pressing it again
+  // is another file: the session that found this holds four near identical
+  // shots taken across three seconds.
   private func confirmShot() {
     shutterFlash = true
     redrawMarks()
-    Timer.scheduledTimer(withTimeInterval: 0.18, repeats: false) { [weak self] _ in
+    paletteView?.needsDisplay = true
+    Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
       self?.shutterFlash = false
       self?.redrawMarks()
+      self?.paletteView?.needsDisplay = true
     }
   }
 
@@ -1101,6 +1168,12 @@ final class Overlay: NSObject, NSApplicationDelegate {
       }
       let drawingCamera = rects.dropLast().last.map { Int($0.minX) } ?? -1
 
+      if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let png = rep.representation(using: .png, properties: [:]) {
+          try? png.write(to: URL(fileURLWithPath: self.session + "/palette.png"))
+        }
+      }
       let lines = ["width \(Int(view.bounds.width))",
                    "controls \(rects.count)",
                    "controls-idle \(idleCount)",
@@ -1113,6 +1186,123 @@ final class Overlay: NSObject, NSApplicationDelegate {
         .write(toFile: self.session + "/layout.probe", atomically: true,
                encoding: .utf8)
     }
+  }
+
+  // Leaving draw mode gives the keyboard back by hiding the application, and
+  // the question the probe asks is what that hiding takes with it: the marks
+  // the user drew, and the frame that says a screenshot was taken.
+  private func probeLeave() {
+    setDrawing(true)
+    drawSelfTestStroke()
+    drawing = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+      self.setDrawing(false)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        var lines = [
+          "shapes \(self.shapes.count)",
+          "screens \(self.markWindows.count)",
+          "marks-visible \(self.markWindows.filter { $0.isVisible }.count)",
+        ]
+        self.confirmShot()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+          lines.append("flash-visible "
+                       + "\(self.markWindows.filter { $0.isVisible }.count)")
+          lines.append("palette-visible "
+                       + "\((self.paletteWindow?.isVisible ?? false) ? 1 : 0)")
+          self.paletteView?.display()
+          let tips = self.paletteView?.tipTexts ?? []
+          lines.append("tips " + tips.joined(separator: ", "))
+        }
+        // How long the confirmation stays up, in hundredths, measured rather
+        // than read off the timer: the user has to catch it out of the corner
+        // of an eye while talking, not look for it.
+        var ticks = 0
+        Timer.scheduledTimer(withTimeInterval: 0.01, repeats: true) { timer in
+          ticks += 1
+          guard !self.shutterFlash || ticks >= 200 else { return }
+          timer.invalidate()
+          lines.append("flash-hundredths \(ticks)")
+          try? (lines.joined(separator: "\n") + "\n")
+            .write(toFile: self.session + "/leave.probe", atomically: true,
+                   encoding: .utf8)
+        }
+      }
+    }
+  }
+
+  // The width keys are the one control with a range rather than a state, so the
+  // probe reports where a handful of presses actually lands inside it.
+  private func probeWidth() {
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+      self.setDrawing(true)
+      self.select(.pen)
+      let start = self.width
+      for _ in 0..<3 { self.widen(+1) }
+      let wider = self.width
+      for _ in 0..<40 { self.widen(+1) }
+      let top = self.width
+      for _ in 0..<80 { self.widen(-1) }
+      let bottom = self.width
+      self.setDrawing(false)
+      let lines = ["start \(Int(start))", "after-three \(Int(wider))",
+                   "top \(Int(top))", "bottom \(Int(bottom))"]
+      try? (lines.joined(separator: "\n") + "\n")
+        .write(toFile: self.session + "/width.probe", atomically: true,
+               encoding: .utf8)
+    }
+  }
+
+  // A wide arrow is the shape most easily got wrong, because everything about
+  // it is drawn relative to a width that is usually small. The probe renders
+  // one through the same code the screen uses and measures the ink, since the
+  // fault the user reported is in the pixels and not in the numbers.
+  private func probeArrow() {
+    var lines: [String] = []
+
+    func measure(_ tag: String, to end: NSPoint, width: CGFloat) {
+      let size = NSSize(width: 500, height: 240)
+      guard let rep = NSBitmapImageRep(
+              bitmapDataPlanes: nil, pixelsWide: Int(size.width),
+              pixelsHigh: Int(size.height), bitsPerSample: 8, samplesPerPixel: 4,
+              hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+              bytesPerRow: 0, bitsPerPixel: 0) else { return }
+      NSGraphicsContext.saveGraphicsState()
+      NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+      NSColor.clear.setFill()
+      NSBezierPath(rect: NSRect(origin: .zero, size: size)).fill()
+      let start = NSPoint(x: 100, y: 120)
+      stroke(Shape(tool: .arrow, colorIndex: 0, width: width, screen: 0,
+                   points: [start, end]))
+      NSGraphicsContext.restoreGraphicsState()
+
+      var beyond = 0, behind = 0, maxHalf = 0, shaftHalf = 0
+      for px in 0..<Int(size.width) {
+        for py in 0..<Int(size.height) {
+          guard let colour = rep.colorAt(x: px, y: py),
+                colour.alphaComponent > 0.5 else { continue }
+          // The bitmap is top down and the arrow is drawn along y = 120.
+          let y = Int(size.height) - 1 - py
+          let half = abs(y - 120)
+          if CGFloat(px) > end.x + 1 { beyond += 1 }
+          if CGFloat(px) < start.x - 1 { behind += 1 }
+          maxHalf = max(maxHalf, half)
+          if px == 110 { shaftHalf = max(shaftHalf, half) }
+        }
+      }
+      lines.append("\(tag)-beyond-tip \(beyond)")
+      lines.append("\(tag)-behind-start \(behind)")
+      lines.append("\(tag)-max-half \(maxHalf)")
+      lines.append("\(tag)-shaft-half \(shaftHalf)")
+      // A number says which assertion broke and a picture says why.
+      if let png = rep.representation(using: .png, properties: [:]) {
+        try? png.write(to: URL(fileURLWithPath: session + "/arrow-" + tag + ".png"))
+      }
+    }
+
+    measure("wide", to: NSPoint(x: 380, y: 120), width: 40)
+    measure("short", to: NSPoint(x: 160, y: 120), width: 40)
+    try? (lines.joined(separator: "\n") + "\n")
+      .write(toFile: session + "/arrow.probe", atomically: true, encoding: .utf8)
   }
 
   // MARK: the pixel test
