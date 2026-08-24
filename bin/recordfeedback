@@ -339,6 +339,51 @@ stop_recorder() {
   return 0
 }
 
+# The shortcuts are settings, so the overlay is the only thing that knows what
+# they currently are. A second copy of the list in here is a copy that goes
+# stale the first time anybody rebinds one.
+hotkey() {
+  local action="$1"
+  [ -x "$OVERLAY_BIN" ] || return 1
+  "$OVERLAY_BIN" --print-keys 2>/dev/null | sed -n "s/^$action //p"
+}
+
+print_hotkeys() {
+  local keys
+  keys="$("$OVERLAY_BIN" --print-keys 2>/dev/null)" || keys=""
+  if [ -z "$keys" ]; then
+    echo "  the overlay would not report its keys, so use its buttons instead."
+    return 0
+  fi
+  local draw shot region stop undo clear hide
+  draw="$(printf '%s\n' "$keys" | sed -n 's/^draw //p')"
+  shot="$(printf '%s\n' "$keys" | sed -n 's/^screenshot //p')"
+  region="$(printf '%s\n' "$keys" | sed -n 's/^region //p')"
+  stop="$(printf '%s\n' "$keys" | sed -n 's/^stop //p')"
+  undo="$(printf '%s\n' "$keys" | sed -n 's/^undo //p')"
+  clear="$(printf '%s\n' "$keys" | sed -n 's/^clear //p')"
+  hide="$(printf '%s\n' "$keys" | sed -n 's/^hide //p')"
+  echo "  $draw draw, $shot screenshot, $region region, $stop stop"
+  echo "  $undo undo, $clear clear, $hide hide the marks"
+}
+
+# The overlay cannot talk to the user: it writes to a log nobody opens. What it
+# has to say is said at the moment it matters, which is here, because most of
+# it is something the user has to go and click.
+report_overlay_warnings() {
+  local session="$1" waited=0
+  while [ "$waited" -lt 25 ]; do
+    [ -f "$session/overlay.ready" ] && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  # The checks the overlay runs after its windows are up take a moment longer
+  # than the ready file does.
+  sleep 0.7
+  [ -s "$session/overlay.log" ] || return 0
+  grep '^rf-overlay:' "$session/overlay.log" 2>/dev/null | sed 's/^rf-overlay: /  /' >&2 || true
+}
+
 stop_overlay() {
   local session="$1"
   local pid
@@ -425,10 +470,11 @@ cmd_start() {
 
   echo "Recording. Talk, and draw on the screen with the hotkeys below."
   if [ "$no_overlay" -eq 0 ] && [ -x "$OVERLAY_BIN" ]; then
-    echo "  opt-cmd-A draw, opt-cmd-X screenshot, opt-cmd-R region, opt-cmd-S stop"
-    echo "  opt-cmd-Z undo, opt-cmd-C clear, opt-cmd-H hide the marks"
+    report_overlay_warnings "$session"
+    print_hotkeys
     echo "  in draw mode: p pen, a arrow, r rectangle, h highlighter, t text"
     echo "  esc, Done, or the same tool again stops drawing. 1 to 6 colours, [ ] width"
+    echo "  change any of these with the gear in the palette, or its menu bar item."
   else
     echo "  no overlay, so no annotations. shift-cmd-4 still takes screenshots."
   fi

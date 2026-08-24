@@ -368,3 +368,61 @@ What it costs: the row is 52 tall rather than 46, to carry the hints. The
 saved position moved to a new key, so the palette starts once in its
 default place for anyone who had moved it. A region capture now has a
 button, which is one more control in both rows.
+
+## 2026-08-24 The shortcuts are settings, and one place knows what they are
+
+Draw mode was on `⌥⌘A` because macOS owns `⌥⌘D` and Carbon will not hand
+it over. Wanting D back is a reasonable thing to want, and so is wanting
+a different key entirely: a session takes seven combinations away from
+every other application on the machine for as long as it runs, and which
+seven is not the author's business.
+
+They live in `~/.recordfeedback/settings.json` and the overlay records
+them by pressing them. The defaults moved to option and shift, which no
+window manager on this machine claims and macOS has no letter shortcut
+on. The cost is the characters option and shift types on a layout that
+has them, `Ç` among them, which the tool's own user accepted knowingly
+and can undo by rebinding.
+
+The file is defended rather than trusted. A binding with no modifier is
+refused, because a bare letter registered globally is that letter taken
+away from the editor the user is talking about. A key outside letters and
+digits is refused, so the file can never name one the overlay would fail
+to register. A file that will not parse leaves every default standing:
+the user is mid session and a broken file must not cost them the stop
+key.
+
+Nothing keeps a second copy of the list. `rf-overlay --print-keys` is the
+one answer, the CLI's banner asks for it, and the slash command was
+changed to repeat what the banner printed rather than to name keys from
+memory.
+
+What it costs: the CLI runs the overlay binary once per start to print
+its own banner, and every key anybody has already learned has moved.
+
+## 2026-08-24 The menu bar item, and what a notch does to it
+
+The palette can be dragged onto a display that is later unplugged, buried
+under a full screen application, or left behind by an overlay whose CLI
+died, which is how a user ended up with a window they could not stop. The
+menu bar is the one place none of that reaches, so the overlay puts a red
+dot and the clock there with a menu carrying every action, the settings,
+Stop, and a force quit that says what it leaves behind.
+
+On the machine this was built for it is invisible. macOS lays status
+items out from the right and, when both strips beside the notch are full,
+places one in the hole rather than refusing it: 1512 points wide, strips
+of 663 and 664, and the item at 683 to 752. Drawn, clickable, and
+invisible, which is worse than absent.
+
+That is a full menu bar and not something the code can fix, so the code
+says so instead. The overlay measures its own item against
+`auxiliaryTopLeftArea` and `auxiliaryTopRightArea` once the windows are
+up, and the CLI prints whatever the overlay warned about as part of the
+start banner, because nobody opens `overlay.log`. The settings also got a
+gear in the palette row, so the one control the menu bar item was the
+only route to is reachable when the item cannot be seen.
+
+What it costs: a second route to the settings, and a start that waits up
+to three seconds for the overlay to have something to say before it
+prints its banner.

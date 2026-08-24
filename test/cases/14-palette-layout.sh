@@ -72,7 +72,7 @@ $contents"
 done
 
 # Stop, the two capture buttons and the shot count exist in both rows.
-for control in stop camera region shots; do
+for control in stop camera region shots settings; do
   assert_eq "$(field "idle-at-$control")" "$(field "drawing-at-$control")" \
     "the $control control sits at the same place on the screen whether the pen
   is down or not. Draw mode is entered by clicking in this row, so a control
@@ -95,8 +95,32 @@ $contents"
   the user is talking. The probe said:
 $contents"
 
-assert_contains "$(field tips)" "opt-cmd-X" \
-  "the capture buttons name their keys. The probe said:
+assert_contains "$(field tips)" "$("$OVERLAY" --print-keys | sed -n 's/^screenshot //p')" \
+  "the capture button names the key the overlay actually registered, not a
+  copy of it written into the row. The probe said:
 $contents"
+
+assert_eq "$(field status-placed)" "1" \
+  "the overlay puts an item in the menu bar. It is the one place a full screen
+  application cannot cover and an unplugged display cannot take away, so it is
+  the way back to a session whose palette has become unreachable. The probe
+  said:
+$contents"
+
+[ "$(field status-menu)" -ge 8 ] \
+  || fail "the menu bar item carries $(field status-menu) menu entries, and it
+  has to carry the tools, the settings, Stop and the way out of a stuck
+  overlay. The probe said:
+$contents"
+
+# A menu bar item that macOS placed in the notch is drawn, clickable and
+# invisible, which is worse than one that was refused. Whichever happened, the
+# tool has to say so rather than leave the user looking for it.
+if [ "$(field status-behind-notch)" = "1" ]; then
+  assert_contains "$(cat "$RF_CASE_TMP/overlay.log")" "behind this display's notch" \
+    "the overlay says so when its indicator lands behind the notch. The menu
+  bar on this machine is full: $(field notch) is the hole and the item is at
+  $(field status-x)"
+fi
 
 echo "both rows fit, and the controls they share do not move between them"

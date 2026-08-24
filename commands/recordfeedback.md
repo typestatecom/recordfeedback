@@ -10,9 +10,12 @@ The user is about to talk instead of type. `$ARGUMENTS` decides what to do.
 
 1. Run `recordfeedback start`.
 2. Tell the user recording is live, in three lines or fewer, and list the
-   keys: `⌥⌘A` draw, `⌥⌘X` screenshot, `⌥⌘R` screenshot a region,
-   `⌥⌘Z` undo, `⌥⌘C` clear, `⌥⌘S` stop. Say nothing else. They are
-   already talking and a wall of text is in their way.
+   keys exactly as `start` printed them. Do not write them from memory:
+   they are settings, the user can rebind any of them, and `start` asks
+   the overlay what is actually bound. If `start` printed anything else,
+   a warning about the menu bar for instance, pass that through too. Say
+   nothing else. They are already talking and a wall of text is in their
+   way.
 3. Run `recordfeedback wait --timeout 570` with a Bash timeout of 570000
    milliseconds. Exit code 0 means the user pressed stop, 2 means the
    timeout passed and nothing is wrong, 3 means the recorder died. On 2,

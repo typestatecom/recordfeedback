@@ -29,14 +29,27 @@ assert_contains "$out" "2 so far" "status with one overlay shot and one folder s
 trap - EXIT
 
 # --- the keys start prints are the keys the overlay registers.
+# The shortcuts are settings now, so a list typed into the CLI is a list that
+# goes stale the first time anybody rebinds one. The overlay is asked.
 if [ -x "$REPO/bin/rf-overlay" ]; then
+  keys="$("$REPO/bin/rf-overlay" --print-keys)"
+  [ -n "$keys" ] || fail "rf-overlay --print-keys printed nothing, so the CLI has
+  no way to name a key without keeping its own copy of the list"
+
+  for action in draw screenshot region undo clear hide stop; do
+    printf '%s\n' "$keys" | grep -q "^$action " \
+      || fail "--print-keys does not name '$action'. It said:
+$keys"
+  done
+
   out="$("$RFB" start)"
   session="$(printf '%s' "$out" | sed -n 's/^  session: //p')"
-  for key in opt-cmd-A opt-cmd-X opt-cmd-R opt-cmd-Z opt-cmd-C opt-cmd-H opt-cmd-S; do
-    assert_contains "$out" "$key" "the hotkey list start prints"
-  done
-  # Option-Command-D is the system's own Dock shortcut and Carbon will not hand
-  # it over, so offering it sends the user to a key that does nothing.
-  assert_not_contains "$out" "opt-cmd-D" "the hotkey list start prints"
+  while read -r action combination; do
+    [ -n "$combination" ] || continue
+    assert_contains "$out" "$combination" \
+      "the keys start prints are the keys the overlay registered. The overlay
+  reports '$action $combination'. Two copies of this list is one that goes
+  stale the first time a key is rebound"
+  done <<< "$keys"
   "$RFB" abort > /dev/null
 fi

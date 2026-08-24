@@ -267,21 +267,50 @@ Behaviour:
 Global hotkeys through Carbon `RegisterEventHotKey`. Carbon hotkeys need
 no Accessibility permission, and a `CGEventTap` does. Use Carbon.
 
-| Key | Action |
-| --- | --- |
-| `⌥⌘A` | toggle draw mode |
-| `⌥⌘X` | screenshot the whole screen, instantly |
-| `⌥⌘R` | screenshot a region, crosshair and drag |
-| `⌥⌘C` | clear all marks |
-| `⌥⌘Z` | undo the last mark |
-| `⌥⌘S` | stop the recording session |
-| `⌥⌘H` | hide or show the marks without clearing them |
+| Action | Default | What it does |
+| --- | --- | --- |
+| `draw` | `⌥⇧D` | toggle draw mode |
+| `screenshot` | `⌥⇧X` | screenshot the whole screen, instantly |
+| `region` | `⌥⇧R` | screenshot a region, crosshair and drag |
+| `clear` | `⌥⇧C` | clear all marks |
+| `undo` | `⌥⇧Z` | undo the last mark |
+| `stop` | `⌥⇧S` | stop the recording session |
+| `hide` | `⌥⇧H` | hide or show the marks without clearing them |
 
-`⌥⌘D` is macOS's own show and hide the Dock, and Carbon will not register
-a hotkey the system already owns, so draw mode is `⌥⌘A` for annotate.
+The left hand column is the name in the settings file and the name
+`--print-keys` reports. The middle one is only the default.
 
-The overlay takes the screenshots itself, with `screencapture -x` for
-`⌥⌘X` and `screencapture -i` for `⌥⌘R`, straight into `$SESSION/inbox`.
+### The shortcuts
+
+A session takes seven key combinations away from every other application
+on the machine for as long as it runs, so which seven is the user's
+choice and not the author's. They live in `~/.recordfeedback/settings.json`
+and the overlay's settings window records them by pressing them, because
+binding a key any other way needs a table of key codes in a README.
+
+The defaults are option and shift: `⌥⇧D` draw, `⌥⇧X` screenshot, `⌥⇧R`
+region, `⌥⇧Z` undo, `⌥⇧C` clear, `⌥⇧H` hide the marks, `⌥⇧S` stop.
+Command pairs are what other applications use, and `⌥⌘D` in particular is
+macOS's own show and hide the Dock, which Carbon will not hand over. The
+cost of option and shift is the characters it types on a layout that has
+them, which is a trade the user makes knowingly and can undo by rebinding.
+
+A binding with no modifier is refused, because a bare letter registered
+globally is that letter taken away from the editor the user is talking
+about. So is a key outside the letters and digits, so that the file can
+never name a key the overlay would fail to register. A file that cannot
+be parsed leaves every default in place: the user is mid session and a
+broken file must not cost them the stop key.
+
+Nothing else keeps a copy of that list. `rf-overlay --print-keys` reports
+what is bound, and the CLI's start banner asks for it, because two copies
+of a list is one that goes stale the first time anybody rebinds a key.
+`18-shortcut-settings` asserts that, and `10-overlay-session` asserts that
+the keys the CLI prints are the keys the overlay reports.
+
+The overlay takes the screenshots itself, with `screencapture -x` for the
+screenshot key and `screencapture -i` for the region key, straight into
+`$SESSION/inbox`.
 `⇧⌘4` still works and `collect` still sweeps the screenshot folder, but
 neither is the path the tool asks for. The overlay's own capture is what
 makes the palette below possible: it hides its own furniture for the
@@ -289,7 +318,7 @@ instant of the capture and puts it back after, so the marks land in the
 file and the tool's own controls do not. A shot in the inbox also needs
 no access to a folder macOS protects.
 
-`⌥⌘S` writes `$SESSION/stop`, where the session path comes from the
+The stop key writes `$SESSION/stop`, where the session path comes from the
 `RF_SESSION` environment variable the CLI sets when it launches the
 overlay. The overlay never reads `~/.recordfeedback/current`, because
 the session it belongs to is the one that started it.
@@ -376,6 +405,27 @@ a heads-up display that fades:
 - The position remembered between sessions is the right hand end, not the
   left, because that is the end that stays put when the row changes
   width.
+- A gear opens the settings window. It is in the row and not only in the
+  menu bar item, because on a full menu bar macOS places that item in the
+  notch, where it is drawn, clickable and invisible.
+
+### The menu bar item
+
+A red dot and the elapsed time, with a menu carrying every action, the
+settings and Stop. The menu bar is the one place a full screen
+application cannot cover, an unplugged display cannot take away and a
+palette dragged out of reach cannot hide, so it is the way back to a
+session that has become unreachable any other way. Its last entry force
+quits the overlay alone, and says what that leaves behind: the recording
+keeps running and `recordfeedback stop` still finishes the session.
+
+macOS lays status items out from the right, and on a display with a notch
+it will place one in the hole rather than refuse it. The overlay measures
+its own item against `auxiliaryTopLeftArea` and `auxiliaryTopRightArea`
+after the windows are up, and says so when it landed there, because an
+item that is drawn and invisible is worse than one that was refused. The
+CLI prints whatever the overlay warned about as part of the start banner,
+since nobody opens `overlay.log`.
 
 The palette is furniture, so it is hidden for the instant of a capture,
 with the crosshair, and put back after. That is only possible because the

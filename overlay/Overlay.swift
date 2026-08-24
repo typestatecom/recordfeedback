@@ -5,6 +5,195 @@
 import Cocoa
 import Carbon.HIToolbox
 
+// -------------------------------------------------------------- the settings
+
+// What a hotkey does. The name is what the settings file calls it and what the
+// CLI prints, so it is written once here and never spelled out again.
+enum Action: String, CaseIterable {
+  case draw, screenshot, region, undo, clear, hide, stop
+
+  var title: String {
+    switch self {
+    case .draw: return "Draw"
+    case .screenshot: return "Screenshot"
+    case .region: return "Screenshot a region"
+    case .undo: return "Undo the last mark"
+    case .clear: return "Clear the marks"
+    case .hide: return "Hide the marks"
+    case .stop: return "Stop the session"
+    }
+  }
+
+  // Option and shift, because a session takes the keys away from every other
+  // application for as long as it runs, and command pairs are what those
+  // applications use. The cost is the characters option-shift types, which is
+  // the trade the tool's own user made.
+  var fallback: Shortcut {
+    switch self {
+    case .draw: return Shortcut(keyCode: kVK_ANSI_D)
+    case .screenshot: return Shortcut(keyCode: kVK_ANSI_X)
+    case .region: return Shortcut(keyCode: kVK_ANSI_R)
+    case .undo: return Shortcut(keyCode: kVK_ANSI_Z)
+    case .clear: return Shortcut(keyCode: kVK_ANSI_C)
+    case .hide: return Shortcut(keyCode: kVK_ANSI_H)
+    case .stop: return Shortcut(keyCode: kVK_ANSI_S)
+    }
+  }
+}
+
+struct Shortcut: Equatable {
+  var keyCode: Int
+  var option = true
+  var shift = true
+  var command = false
+  var control = false
+
+  // The Carbon modifier mask, which is not the AppKit one.
+  var carbonModifiers: UInt32 {
+    var mask: Int = 0
+    if option { mask |= optionKey }
+    if shift { mask |= shiftKey }
+    if command { mask |= cmdKey }
+    if control { mask |= controlKey }
+    return UInt32(mask)
+  }
+
+  var isEmpty: Bool { !option && !shift && !command && !control }
+
+  // What the palette and the menus show. The symbols are in the order macOS
+  // writes them, so a key read here is a key recognised anywhere else.
+  var display: String {
+    var text = ""
+    if control { text += "\u{2303}" }
+    if option { text += "\u{2325}" }
+    if shift { text += "\u{21E7}" }
+    if command { text += "\u{2318}" }
+    return text + Keys.name(for: keyCode)
+  }
+
+  // What a terminal prints, where the symbols are unreadable.
+  var plain: String {
+    var parts: [String] = []
+    if control { parts.append("ctrl") }
+    if option { parts.append("opt") }
+    if shift { parts.append("shift") }
+    if command { parts.append("cmd") }
+    parts.append(Keys.name(for: keyCode))
+    return parts.joined(separator: "-")
+  }
+}
+
+// The keys a shortcut is allowed to use. Letters and digits only: this is the
+// whole set the settings window can record, so a key with no name here cannot
+// be bound and cannot end up in the file.
+enum Keys {
+  static let table: [(Int, String)] = [
+    (kVK_ANSI_A, "A"), (kVK_ANSI_B, "B"), (kVK_ANSI_C, "C"), (kVK_ANSI_D, "D"),
+    (kVK_ANSI_E, "E"), (kVK_ANSI_F, "F"), (kVK_ANSI_G, "G"), (kVK_ANSI_H, "H"),
+    (kVK_ANSI_I, "I"), (kVK_ANSI_J, "J"), (kVK_ANSI_K, "K"), (kVK_ANSI_L, "L"),
+    (kVK_ANSI_M, "M"), (kVK_ANSI_N, "N"), (kVK_ANSI_O, "O"), (kVK_ANSI_P, "P"),
+    (kVK_ANSI_Q, "Q"), (kVK_ANSI_R, "R"), (kVK_ANSI_S, "S"), (kVK_ANSI_T, "T"),
+    (kVK_ANSI_U, "U"), (kVK_ANSI_V, "V"), (kVK_ANSI_W, "W"), (kVK_ANSI_X, "X"),
+    (kVK_ANSI_Y, "Y"), (kVK_ANSI_Z, "Z"),
+    (kVK_ANSI_0, "0"), (kVK_ANSI_1, "1"), (kVK_ANSI_2, "2"), (kVK_ANSI_3, "3"),
+    (kVK_ANSI_4, "4"), (kVK_ANSI_5, "5"), (kVK_ANSI_6, "6"), (kVK_ANSI_7, "7"),
+    (kVK_ANSI_8, "8"), (kVK_ANSI_9, "9"),
+  ]
+
+  static func name(for keyCode: Int) -> String {
+    table.first { $0.0 == keyCode }?.1 ?? "?"
+  }
+
+  static func code(for name: String) -> Int? {
+    table.first { $0.1 == name.uppercased() }?.0
+  }
+}
+
+// One file, read by the overlay and by the CLI, so that the keys the terminal
+// prints are the keys the overlay registered. It lives beside the sessions and
+// not in UserDefaults, because a shell script cannot read a plist the way it
+// can read JSON.
+final class Settings {
+  static let shared = Settings()
+
+  private(set) var shortcuts: [Action: Shortcut] = [:]
+
+  var path: String {
+    let home = ProcessInfo.processInfo.environment["RF_HOME"]
+      ?? NSHomeDirectory() + "/.recordfeedback"
+    return home + "/settings.json"
+  }
+
+  private init() { load() }
+
+  func shortcut(_ action: Action) -> Shortcut {
+    shortcuts[action] ?? action.fallback
+  }
+
+  // The first action that already holds this combination, so the settings
+  // window can refuse a binding rather than register a key that silently
+  // shadows another one.
+  func conflict(_ candidate: Shortcut, ignoring action: Action) -> Action? {
+    Action.allCases.first { $0 != action && shortcut($0) == candidate }
+  }
+
+  func set(_ action: Action, to candidate: Shortcut) {
+    shortcuts[action] = candidate
+    save()
+  }
+
+  func reset() {
+    shortcuts = [:]
+    for action in Action.allCases { shortcuts[action] = action.fallback }
+    save()
+  }
+
+  func load() {
+    shortcuts = [:]
+    for action in Action.allCases { shortcuts[action] = action.fallback }
+    guard let data = FileManager.default.contents(atPath: path),
+          let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+          let bound = root["shortcuts"] as? [String: Any] else { return }
+    for action in Action.allCases {
+      guard let entry = bound[action.rawValue] as? [String: Any],
+            let name = entry["key"] as? String,
+            let code = Keys.code(for: name) else { continue }
+      let modifiers = (entry["modifiers"] as? [String]) ?? []
+      let candidate = Shortcut(keyCode: code,
+                               option: modifiers.contains("option"),
+                               shift: modifiers.contains("shift"),
+                               command: modifiers.contains("command"),
+                               control: modifiers.contains("control"))
+      // A binding with no modifier is a letter taken away from every other
+      // application on the machine, so it is not one this file may ask for.
+      guard !candidate.isEmpty else { continue }
+      shortcuts[action] = candidate
+    }
+  }
+
+  func save() {
+    var bound: [String: Any] = [:]
+    for action in Action.allCases {
+      let one = shortcut(action)
+      var modifiers: [String] = []
+      if one.control { modifiers.append("control") }
+      if one.option { modifiers.append("option") }
+      if one.shift { modifiers.append("shift") }
+      if one.command { modifiers.append("command") }
+      bound[action.rawValue] = ["key": Keys.name(for: one.keyCode),
+                                "modifiers": modifiers,
+                                "shows": one.display]
+    }
+    let root: [String: Any] = ["shortcuts": bound]
+    guard let data = try? JSONSerialization.data(
+            withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return }
+    let folder = (path as NSString).deletingLastPathComponent
+    try? FileManager.default.createDirectory(atPath: folder,
+                                             withIntermediateDirectories: true)
+    try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+  }
+}
+
 // ---------------------------------------------------------------- the model
 
 enum Tool: Int, CaseIterable {
@@ -84,20 +273,29 @@ final class Hotkeys {
     }, 1, &spec, nil, nil)
   }
 
-  func register(_ keyCode: Int, named name: String, handler: @escaping () -> Void) {
+  func register(_ key: Shortcut, handler: @escaping () -> Void) {
     let id = nextID
     nextID += 1
     var ref: EventHotKeyRef?
     let hotKeyID = EventHotKeyID(signature: OSType(0x52464244), id: id)
-    let status = RegisterEventHotKey(UInt32(keyCode), UInt32(optionKey | cmdKey),
+    let status = RegisterEventHotKey(UInt32(key.keyCode), key.carbonModifiers,
                                      hotKeyID, GetApplicationEventTarget(), 0, &ref)
     if status != noErr || ref == nil {
-      warn("could not register \(name), another application already owns it.")
-      warn("  fix: quit whatever owns \(name), or use the palette button instead.")
+      warn("could not register \(key.plain), another application already owns it.")
+      warn("  fix: quit whatever owns \(key.plain), or change the key in the")
+      warn("  overlay's settings, which the menu bar item opens.")
       return
     }
     handlers[id] = handler
     refs.append(ref!)
+  }
+
+  // A rebound key has to stop firing the thing it used to do, and Carbon keeps
+  // the old registration alive until it is told otherwise.
+  func unregisterAll() {
+    for ref in refs { UnregisterEventHotKey(ref) }
+    refs.removeAll()
+    handlers.removeAll()
   }
 
   private func fire(_ id: UInt32) { handlers[id]?() }
@@ -262,6 +460,154 @@ final class PaletteView: NSView, NSViewToolTipOwner {
   }
 }
 
+// ------------------------------------------------------------ the settings UI
+
+// A session takes seven key combinations away from every other application on
+// the machine for as long as it runs, so which seven has to be the user's
+// choice and not the author's. Recording a key rather than typing its name is
+// the only way to bind one without a table of key codes in a README.
+final class SettingsWindow: NSWindowController {
+  private weak var overlay: Overlay?
+  private var rows: [Action: NSButton] = [:]
+  private var notes: [Action: NSTextField] = [:]
+  private var recording: Action?
+  private var monitor: Any?
+
+  init(overlay: Overlay) {
+    self.overlay = overlay
+    let size = NSSize(width: 460, height: CGFloat(Action.allCases.count) * 40 + 132)
+    let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                          styleMask: [.titled, .closable], backing: .buffered,
+                          defer: false)
+    window.title = "recordfeedback shortcuts"
+    window.isReleasedWhenClosed = false
+    super.init(window: window)
+    build(in: window)
+  }
+
+  required init?(coder: NSCoder) { fatalError("not loaded from a nib") }
+
+  func show() {
+    refresh()
+    window?.center()
+    window?.makeKeyAndOrderFront(nil)
+  }
+
+  private func build(in window: NSWindow) {
+    guard let content = window.contentView else { return }
+    var y = window.frame.height - 62
+
+    let heading = NSTextField(labelWithString:
+      "These keys belong to recordfeedback for as long as a session is"
+      + " running, and to nothing else.")
+    heading.frame = NSRect(x: 20, y: y + 14, width: 420, height: 32)
+    heading.font = NSFont.systemFont(ofSize: 11)
+    heading.textColor = .secondaryLabelColor
+    heading.lineBreakMode = .byWordWrapping
+    heading.maximumNumberOfLines = 2
+    content.addSubview(heading)
+
+    for action in Action.allCases {
+      y -= 40
+      let label = NSTextField(labelWithString: action.title)
+      label.frame = NSRect(x: 20, y: y + 6, width: 200, height: 18)
+      label.font = NSFont.systemFont(ofSize: 13)
+      content.addSubview(label)
+
+      let button = NSButton(title: "", target: self, action: #selector(startRecording(_:)))
+      button.frame = NSRect(x: 224, y: y, width: 104, height: 28)
+      button.bezelStyle = .rounded
+      button.tag = Action.allCases.firstIndex(of: action) ?? 0
+      content.addSubview(button)
+      rows[action] = button
+
+      let note = NSTextField(labelWithString: "")
+      note.frame = NSRect(x: 334, y: y + 6, width: 108, height: 18)
+      note.font = NSFont.systemFont(ofSize: 10)
+      note.textColor = .systemRed
+      content.addSubview(note)
+      notes[action] = note
+    }
+
+    let reset = NSButton(title: "Restore defaults", target: self,
+                         action: #selector(restoreDefaults))
+    reset.frame = NSRect(x: 20, y: 20, width: 150, height: 30)
+    reset.bezelStyle = .rounded
+    content.addSubview(reset)
+
+    let where_ = NSTextField(labelWithString: Settings.shared.path)
+    where_.frame = NSRect(x: 180, y: 26, width: 262, height: 16)
+    where_.font = NSFont.systemFont(ofSize: 9)
+    where_.textColor = .tertiaryLabelColor
+    where_.lineBreakMode = .byTruncatingHead
+    content.addSubview(where_)
+  }
+
+  private func refresh() {
+    for (action, button) in rows {
+      button.title = recording == action ? "Press keys" : Settings.shared.shortcut(action).display
+    }
+  }
+
+  @objc private func startRecording(_ sender: NSButton) {
+    guard sender.tag < Action.allCases.count else { return }
+    let action = Action.allCases[sender.tag]
+    stopRecording()
+    recording = action
+    notes[action]?.stringValue = ""
+    refresh()
+
+    monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+      self?.captured(event)
+      return nil
+    }
+  }
+
+  private func captured(_ event: NSEvent) {
+    guard let action = recording else { return }
+    let flags = event.modifierFlags
+    if Int(event.keyCode) == kVK_Escape && !flags.contains(.option) {
+      stopRecording()
+      refresh()
+      return
+    }
+    let candidate = Shortcut(keyCode: Int(event.keyCode),
+                             option: flags.contains(.option),
+                             shift: flags.contains(.shift),
+                             command: flags.contains(.command),
+                             control: flags.contains(.control))
+
+    // A key with no name here cannot be registered, and a key with no modifier
+    // would be taken away from every application on the machine.
+    if Keys.name(for: candidate.keyCode) == "?" {
+      notes[action]?.stringValue = "letters and digits"
+    } else if candidate.isEmpty {
+      notes[action]?.stringValue = "needs a modifier"
+    } else if let clash = Settings.shared.conflict(candidate, ignoring: action) {
+      notes[action]?.stringValue = "held by " + clash.rawValue
+    } else {
+      Settings.shared.set(action, to: candidate)
+      notes[action]?.stringValue = ""
+      overlay?.reinstallHotkeys()
+      stopRecording()
+    }
+    refresh()
+  }
+
+  private func stopRecording() {
+    if let monitor = monitor { NSEvent.removeMonitor(monitor) }
+    monitor = nil
+    recording = nil
+  }
+
+  @objc private func restoreDefaults() {
+    Settings.shared.reset()
+    for note in notes.values { note.stringValue = "" }
+    overlay?.reinstallHotkeys()
+    refresh()
+  }
+}
+
 // ----------------------------------------------------------- the controller
 
 final class Overlay: NSObject, NSApplicationDelegate {
@@ -287,6 +633,11 @@ final class Overlay: NSObject, NSApplicationDelegate {
   private var shots = 0
   private var shutterFlash = false
   private var keyMonitor: Any?
+  private var statusItem: NSStatusItem?
+  private var settingsWindow: SettingsWindow?
+  // Set the instant Stop is pressed, so the row and the menu bar can say the
+  // click landed before anything downstream has had time to answer it.
+  private(set) var stopping = false
 
   private var width: CGFloat {
     get { widths[tool] ?? tool.defaultWidth }
@@ -320,6 +671,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
       guard let self = self else { return }
       self.pulseOn.toggle()
       self.paletteView?.needsDisplay = true
+      self.refreshStatusItem()
     }
 
     // A stuck overlay swallows clicks and cannot be debugged with the mouse, so
@@ -353,6 +705,8 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "arrow" {
       probeArrow()
     }
+    buildStatusItem()
+
     // Written last, so a test that waits for it knows the windows are up.
     FileManager.default.createFile(atPath: session + "/overlay.ready", contents: nil)
   }
@@ -411,7 +765,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
   let anchoredControls = ["shots", "region", "camera", "stop"]
 
   private let paletteHeight: CGFloat = 52
-  private var paletteWidth: CGFloat { drawing ? 852 : 404 }
+  private var paletteWidth: CGFloat { drawing ? 894 : 446 }
 
   private func buildPalette() {
     // The idle width. The tools, the colours and the width control belong to
@@ -460,7 +814,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
         let limit = screen.frame
         // Room for the wide row, so that entering draw mode never runs the
         // left hand end off the edge of the screen.
-        let right = min(max(anchor.x, limit.minX + 852), limit.maxX)
+        let right = min(max(anchor.x, limit.minX + 894), limit.maxX)
         return NSPoint(x: right - size.width,
                        y: min(anchor.y, limit.maxY - size.height))
       }
@@ -498,29 +852,164 @@ final class Overlay: NSObject, NSApplicationDelegate {
 
   private func installHotkeys() {
     Hotkeys.shared.install()
-    // Option-Command-D is the system's own show and hide the Dock and Carbon
-    // will not hand it over, so draw mode is A for annotate.
-    Hotkeys.shared.register(kVK_ANSI_A, named: "opt-cmd-A") { [weak self] in
-      self?.setDrawing(!(self?.drawing ?? false))
+    reinstallHotkeys()
+  }
+
+  // Called again whenever the settings change, so a rebound key takes effect
+  // without ending the session the user is in the middle of.
+  func reinstallHotkeys() {
+    Hotkeys.shared.unregisterAll()
+    for action in Action.allCases {
+      let key = Settings.shared.shortcut(action)
+      Hotkeys.shared.register(key) { [weak self] in self?.perform(action) }
     }
-    Hotkeys.shared.register(kVK_ANSI_X, named: "opt-cmd-X") { [weak self] in
-      self?.capture(region: false)
+    paletteView?.needsDisplay = true
+    rebuildMenu()
+  }
+
+  func perform(_ action: Action) {
+    switch action {
+    case .draw: setDrawing(!drawing)
+    case .screenshot: capture(region: false)
+    case .region: capture(region: true)
+    case .undo: undo()
+    case .clear: clear()
+    case .hide: toggleHidden()
+    case .stop: stopSession()
     }
-    Hotkeys.shared.register(kVK_ANSI_R, named: "opt-cmd-R") { [weak self] in
-      self?.capture(region: true)
+  }
+
+  // MARK: the menu bar
+
+  // The palette can be dragged off a screen that was unplugged, covered by a
+  // full screen application, or left behind by an overlay whose CLI died. The
+  // menu bar is the one place on macOS that none of that can reach, so it
+  // carries the proof that recording is live and, more importantly, a way out.
+  private func buildStatusItem() {
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    item.button?.imagePosition = .noImage
+    statusItem = item
+    rebuildMenu()
+    refreshStatusItem()
+    // The bar lays its items out from the right, and on a display with a notch
+    // it will place one in the hole rather than refuse it. The item is then
+    // drawn, clickable and invisible, which is worse than absent, so the one
+    // thing the tool can do is say which of those happened.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { self.checkStatusItemVisible() }
+  }
+
+  private func checkStatusItemVisible() {
+    guard let bar = statusItem?.button?.window else {
+      warn("the menu bar had no room for the recording indicator.")
+      warn("  fix: remove an icon from the menu bar, then start again.")
+      warn("  the palette on the screen and recordfeedback stop both still work.")
+      return
     }
-    Hotkeys.shared.register(kVK_ANSI_C, named: "opt-cmd-C") { [weak self] in
-      self?.clear()
+    guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(bar.frame) }),
+          let left = screen.auxiliaryTopLeftArea,
+          let right = screen.auxiliaryTopRightArea else { return }
+    guard bar.frame.maxX > left.maxX && bar.frame.minX < right.minX else { return }
+    warn("the recording indicator landed behind this display's notch, so it is"
+         + " there but cannot be seen.")
+    warn("  the menu bar is full: the strips beside the notch are"
+         + " \(Int(left.width)) and \(Int(right.width)) points wide and both are taken.")
+    warn("  fix: remove an icon from the menu bar, or hold command and drag one"
+         + " off it, then start the session again.")
+    warn("  the palette on the screen and recordfeedback stop both still work.")
+  }
+
+  private func refreshStatusItem() {
+    guard let button = statusItem?.button else { return }
+    let elapsed = Int(Date().timeIntervalSince(startedAt))
+    let clock = String(format: "%02d:%02d", elapsed / 60, elapsed % 60)
+    let text = NSMutableAttributedString()
+    let dot = NSAttributedString(
+      string: stopping ? "\u{25A0} " : "\u{25CF} ",
+      attributes: [.foregroundColor: stopping
+                     ? NSColor.secondaryLabelColor
+                     : NSColor(srgbRed: 0.90, green: 0.20, blue: 0.17,
+                               alpha: pulseOn ? 1.0 : 0.35),
+                   .font: NSFont.systemFont(ofSize: 11)])
+    text.append(dot)
+    text.append(NSAttributedString(
+      string: stopping ? "stopping" : clock,
+      attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)]))
+    button.attributedTitle = text
+    button.toolTip = stopping
+      ? "recordfeedback is finishing the session"
+      : "recordfeedback is recording. \(shots) screenshot"
+        + (shots == 1 ? "" : "s") + " so far."
+  }
+
+  func rebuildMenu() {
+    guard let item = statusItem else { return }
+    let menu = NSMenu()
+    menu.autoenablesItems = false
+
+    let header = NSMenuItem(title: "Recording this session", action: nil, keyEquivalent: "")
+    header.isEnabled = false
+    menu.addItem(header)
+    menu.addItem(.separator())
+
+    for action in [Action.draw, .screenshot, .region, .undo, .clear, .hide] {
+      menu.addItem(menuItem(action))
     }
-    Hotkeys.shared.register(kVK_ANSI_Z, named: "opt-cmd-Z") { [weak self] in
-      self?.undo()
+
+    menu.addItem(.separator())
+    let settings = NSMenuItem(title: "Shortcuts and settings...",
+                              action: #selector(openSettings), keyEquivalent: "")
+    settings.target = self
+    menu.addItem(settings)
+
+    menu.addItem(.separator())
+    menu.addItem(menuItem(.stop))
+
+    // The way out of an overlay whose session nobody is listening to any more.
+    // It says what it leaves behind, because quitting the window is not the
+    // same as ending the recording and the user has to know which one they got.
+    let quit = NSMenuItem(title: "Force quit the overlay",
+                          action: #selector(forceQuit), keyEquivalent: "")
+    quit.target = self
+    quit.toolTip = "Closes this window only. The recording keeps running, and"
+      + " recordfeedback stop still finishes the session with nothing lost."
+    menu.addItem(quit)
+
+    item.menu = menu
+  }
+
+  // The shortcut is written into the title rather than bound as a key
+  // equivalent, because the same combination is already a global hotkey and
+  // binding it twice fires it twice while the overlay is frontmost.
+  private func menuItem(_ action: Action) -> NSMenuItem {
+    let key = Settings.shared.shortcut(action)
+    let item = NSMenuItem(title: action.title + "  (" + key.display + ")",
+                          action: #selector(menuAction(_:)), keyEquivalent: "")
+    item.target = self
+    item.representedObject = action.rawValue
+    if action == .draw { item.state = drawing ? .on : .off }
+    if action == .hide { item.state = marksHidden ? .on : .off }
+    return item
+  }
+
+  @objc private func menuAction(_ sender: NSMenuItem) {
+    guard let raw = sender.representedObject as? String,
+          let action = Action(rawValue: raw) else { return }
+    perform(action)
+    rebuildMenu()
+  }
+
+  @objc private func forceQuit() {
+    warn("force quit from the menu bar. The recording is still running.")
+    warn("  finish the session with: recordfeedback stop")
+    NSApp.terminate(nil)
+  }
+
+  @objc func openSettings() {
+    if settingsWindow == nil {
+      settingsWindow = SettingsWindow(overlay: self)
     }
-    Hotkeys.shared.register(kVK_ANSI_H, named: "opt-cmd-H") { [weak self] in
-      self?.toggleHidden()
-    }
-    Hotkeys.shared.register(kVK_ANSI_S, named: "opt-cmd-S") { [weak self] in
-      self?.stopSession()
-    }
+    NSApp.activate(ignoringOtherApps: true)
+    settingsWindow?.show()
   }
 
   // MARK: modes
@@ -926,7 +1415,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
       // One way in, named, so the row does not have to carry the whole tray
       // while the user is talking.
       let draw = NSRect(x: x, y: mid - 15, width: 78, height: 30)
-      control(draw, in: view, on: false, key: "\u{2325}\u{2318}A", tip: "draw (opt-cmd-A)") {
+      let drawKey = Settings.shared.shortcut(.draw)
+      control(draw, in: view, on: false, key: drawKey.display,
+              tip: "draw (" + drawKey.plain + ")") {
         [weak self] in self?.setDrawing(true)
       }
       drawToolIcon(tool, in: NSRect(x: draw.minX + 4, y: draw.minY, width: 24,
@@ -957,9 +1448,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     label("Stop", at: NSPoint(x: stop.midX - 16, y: mid - 7), size: 13,
           weight: .semibold, color: .white)
     view.addHit(stop) { [weak self] in self?.stopSession() }
-    view.addTip(stop, "end the session (opt-cmd-S)")
+    view.addTip(stop, "end the session (" + Settings.shared.shortcut(.stop).plain + ")")
     view.name("stop", stop)
-    hint("\u{2325}\u{2318}S", under: stop, view: view)
+    hint(Settings.shared.shortcut(.stop).display, under: stop, view: view)
     right = stop.minX - 12
 
     let count = NSRect(x: right - 46, y: mid - 9, width: 46, height: 18)
@@ -969,9 +1460,21 @@ final class Overlay: NSObject, NSApplicationDelegate {
     view.name("shots", count)
     right = count.minX - 10
 
+    // The menu bar is where this lives, and on a full menu bar macOS puts the
+    // item behind the notch, where it is drawn and invisible. The row is the
+    // one place the user can always reach.
+    let gear = NSRect(x: right - 30, y: mid - 15, width: 30, height: 30)
+    control(gear, in: view, on: false, key: "", tip: "shortcuts and settings") {
+      [weak self] in self?.openSettings()
+    }
+    drawGearIcon(in: gear, color: NSColor(white: 1, alpha: 0.8))
+    view.name("settings", gear)
+    right = gear.minX - 12
+
     let region = NSRect(x: right - 32, y: mid - 15, width: 32, height: 30)
-    control(region, in: view, on: false, key: "\u{2325}\u{2318}R",
-            tip: "screenshot a region (opt-cmd-R)") {
+    let regionKey = Settings.shared.shortcut(.region)
+    control(region, in: view, on: false, key: regionKey.display,
+            tip: "screenshot a region (" + regionKey.plain + ")") {
       [weak self] in self?.capture(region: true)
     }
     drawRegionIcon(in: region, color: NSColor(white: 1, alpha: 0.85))
@@ -982,8 +1485,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     // the eye of someone mid sentence is on neither edge. The row is where they
     // last looked, so the confirmation is repeated on the control itself.
     let camera = NSRect(x: right - 32, y: mid - 15, width: 32, height: 30)
-    control(camera, in: view, on: shutterFlash, key: "\u{2325}\u{2318}X",
-            tip: "screenshot (opt-cmd-X)") {
+    let shotKey = Settings.shared.shortcut(.screenshot)
+    control(camera, in: view, on: shutterFlash, key: shotKey.display,
+            tip: "screenshot (" + shotKey.plain + ")") {
       [weak self] in self?.capture(region: false)
     }
     drawCameraIcon(in: camera, color: NSColor(white: 1, alpha: 0.9))
@@ -1010,12 +1514,35 @@ final class Overlay: NSObject, NSApplicationDelegate {
   }
 
   private func hint(_ text: String, under rect: NSRect, view: PaletteView) {
+    guard !text.isEmpty else { return }
     let font = NSFont.systemFont(ofSize: 8, weight: .medium)
     let size = (text as NSString).size(withAttributes: [.font: font])
     let at = NSPoint(x: rect.midX - size.width / 2, y: 4)
     label(text, at: at, size: 8, weight: .medium,
           color: NSColor(white: 1, alpha: 0.45))
     view.addHint(NSRect(origin: at, size: size))
+  }
+
+  private func drawGearIcon(in rect: NSRect, color: NSColor) {
+    color.setStroke()
+    color.setFill()
+    let centre = NSPoint(x: rect.midX, y: rect.midY)
+    let teeth = 8
+    let path = NSBezierPath()
+    for tooth in 0..<teeth {
+      let angle = CGFloat(tooth) * .pi * 2 / CGFloat(teeth)
+      let inner = NSPoint(x: centre.x + cos(angle) * 4.5, y: centre.y + sin(angle) * 4.5)
+      let outer = NSPoint(x: centre.x + cos(angle) * 7.5, y: centre.y + sin(angle) * 7.5)
+      path.move(to: inner)
+      path.line(to: outer)
+    }
+    path.lineWidth = 2.5
+    path.lineCapStyle = .round
+    path.stroke()
+    let ring = NSBezierPath(ovalIn: NSRect(x: centre.x - 5, y: centre.y - 5,
+                                           width: 10, height: 10))
+    ring.lineWidth = 2
+    ring.stroke()
   }
 
   // A dashed corner rather than a full frame, which is what a region capture
@@ -1333,7 +1860,36 @@ final class Overlay: NSObject, NSApplicationDelegate {
                 "\(tag)-untipped \(rects.count - view.tipTexts.count)"] + anchors
       }
 
-      var lines = snapshot("idle")
+      // The menu bar is the way out of an overlay whose window is unreachable,
+      // so whether the item actually got a place on it is a fact worth having
+      // rather than assuming: macOS drops status items that do not fit.
+      var lines: [String] = []
+      if let button = self.statusItem?.button, let bar = button.window {
+        lines.append("status-placed 1")
+        lines.append("status-width \(Int(bar.frame.width))")
+        lines.append("status-x \(Int(bar.frame.minX))")
+        lines.append("status-onscreen "
+                     + "\(NSScreen.screens.contains { $0.frame.intersects(bar.frame) } ? 1 : 0)")
+        lines.append("status-menu \(self.statusItem?.menu?.items.count ?? 0)")
+        // A display with a notch has two usable strips and a hole between
+        // them, and an item macOS placed in the hole is an item nobody sees.
+        if let screen = NSScreen.screens.first(where: { $0.frame.intersects(bar.frame) }) {
+          lines.append("screen-width \(Int(screen.frame.width))")
+          let left = screen.auxiliaryTopLeftArea
+          let right = screen.auxiliaryTopRightArea
+          if let left = left, let right = right {
+            lines.append("notch \(Int(left.maxX)) \(Int(right.minX))")
+            let visible = bar.frame.maxX <= left.maxX || bar.frame.minX >= right.minX
+            lines.append("status-behind-notch \(visible ? 0 : 1)")
+          } else {
+            lines.append("notch none")
+            lines.append("status-behind-notch 0")
+          }
+        }
+      } else {
+        lines.append("status-placed 0")
+      }
+      lines += snapshot("idle")
       self.setDrawing(true)
       lines += snapshot("drawing")
       lines.append("tips " + view.tipTexts.joined(separator: ", "))
@@ -1497,6 +2053,15 @@ final class Overlay: NSObject, NSApplicationDelegate {
 // Screen Recording is the permission that breaks this tool silently: without it
 // screencapture still writes a file and the file is only the wallpaper. doctor
 // asks here rather than guessing from the pixels of a shot.
+// The CLI prints the key list at the start of every session, and a second copy
+// of it in the shell script is a copy that goes stale the first time anybody
+// rebinds one. It asks the overlay instead.
+if CommandLine.arguments.contains("--print-keys") {
+  for action in Action.allCases {
+    print(action.rawValue + " " + Settings.shared.shortcut(action).plain)
+  }
+  exit(0)
+}
 if CommandLine.arguments.contains("--check-capture") {
   exit(CGPreflightScreenCaptureAccess() ? 0 : 1)
 }
