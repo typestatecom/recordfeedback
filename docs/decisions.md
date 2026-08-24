@@ -107,3 +107,28 @@ not only the ones taken during a session, so the README has to say it and
 has to say how to put it back. `doctor` keeps listing the folder rather
 than trusting the setting, because a person who points it back at the
 Desktop gets silence otherwise.
+
+## 2026-08-24 A paragraph never spans a screenshot
+
+The spec asks for two things that fight each other: segments merged into
+paragraphs of roughly 40 words, and a picture placed after the segment
+that was being spoken when it was taken. Merging first buries the picture
+at the end of a paragraph, after sentences said ten seconds later, and
+the placement is the only thing this document exists for. So the merge
+closes a paragraph as soon as a screenshot offset falls inside it.
+
+What it costs: a paragraph next to a screenshot is shorter than 40 words,
+sometimes a single sentence. That reads fine and the alternative does not.
+
+## 2026-08-24 Silence is measured from the audio, not read from the transcript
+
+Whisper invents speech out of digital silence. Thirty seconds of
+`anullsrc` transcribes as "Thank you.", which would have gone into
+`feedback.md` as something the user said. So `stop` measures
+`mean_volume` with ffmpeg's `volumedetect` and writes `silent` into
+`meta.json`, and anything at or below -60 dBFS sets the transcript aside
+and says the recording was silent.
+
+What it costs: one extra ffmpeg pass over the WAV at stop time, and a
+threshold. -60 dBFS is far below a person talking in a quiet room, which
+sits above -40, and far above a muted microphone, which lands near -91.

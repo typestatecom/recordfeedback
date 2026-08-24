@@ -124,12 +124,17 @@ live_session() {
   printf '%s' "$dir"
 }
 
+# Seconds between two reference files, or between one and now.
 elapsed_seconds() {
-  local ref="$1"
-  local start now
+  local ref="$1" until="${2:-}"
+  local start end
   start="$(stat -f %m "$ref")"
-  now="$(date +%s)"
-  echo $((now - start))
+  if [ -n "$until" ] && [ -f "$until" ]; then
+    end="$(stat -f %m "$until")"
+  else
+    end="$(date +%s)"
+  fi
+  echo $((end - start))
 }
 
 format_mmss() {
@@ -620,6 +625,278 @@ transcript_words() {
     | tr -s '[:space:]' '\n' | grep -c '[[:alnum:]]' || echo 0
 }
 
+# ------------------------------------------------------------------- feedback
+
+# The join is the reason this tool exists: a picture placed at the second it
+# was taken inside a transcript. The merge is real text work, so it is python
+# and not a pile of jq, and python3 is already a dependency doctor checks.
+cmd_feedback() {
+  local session="${1:-}"
+  if [ -z "$session" ]; then
+    session="$(live_session || true)"
+    [ -n "$session" ] || die "feedback: no session given and none is running" \
+      "recordfeedback feedback <session directory>"
+  fi
+  [ -d "$session" ] || die "feedback: no such session directory" "" "check the path: $session"
+  [ -f "$session/meta.json" ] || die "feedback: $session has no meta.json" "" \
+    "the session never started, there is nothing to write about"
+
+  python3 - "$session" <<'PYTHON'
+import json
+import os
+import sys
+
+session = sys.argv[1]
+WORDS_PER_PARAGRAPH = 40
+QUOTE_WORDS = 25
+
+
+def load(name, default):
+    path = os.path.join(session, name)
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (ValueError, OSError):
+        return default
+
+
+def mtime(name):
+    path = os.path.join(session, name)
+    return os.stat(path).st_mtime if os.path.exists(path) else None
+
+
+def mmss(seconds):
+    seconds = max(0, int(seconds))
+    return "%02d:%02d" % (seconds // 60, seconds % 60)
+
+
+def duration(seconds):
+    seconds = max(0, int(round(seconds)))
+    if seconds < 60:
+        return "%ds" % seconds
+    return "%dm%02ds" % (seconds // 60, seconds % 60)
+
+
+def home_relative(path):
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
+meta = load("meta.json", {})
+# Whisper invents words out of digital silence, "Thank you." above all, so a
+# silent session is decided by measuring the audio and never by the transcript.
+silent = meta.get("silent") == "true"
+transcript = load("transcript.json", {})
+shots = load("shots.json", [])
+segments = [] if silent else [s for s in transcript.get("transcription", [])
+                              if s.get("text", "").strip()]
+
+start = mtime("start.ref")
+stop = mtime("stop.ref")
+seconds = (stop - start) if (start and stop and stop > start) else 0
+if not seconds and segments:
+    seconds = segments[-1].get("offsets", {}).get("to", 0) / 1000.0
+
+# Whisper segments are a few seconds each and one line per segment is
+# unreadable, so they merge into paragraphs stamped with the offset of the
+# first segment in the paragraph.
+shot_offsets = sorted(shot.get("offset_ms", 0) for shot in shots)
+paragraphs = []
+for segment in segments:
+    text = segment["text"].strip()
+    offset = segment.get("offsets", {}).get("from", 0)
+    start_new = not paragraphs or paragraphs[-1]["words"] >= WORDS_PER_PARAGRAPH
+    # A paragraph never spans a screenshot. Without this the merge buries the
+    # picture at the end of a paragraph, after sentences that were said later,
+    # and the second it was taken is the only thing that places it.
+    if paragraphs and not start_new:
+        start_new = any(paragraphs[-1]["offset"] <= x < offset for x in shot_offsets)
+    if start_new:
+        paragraphs.append({"offset": offset, "text": text, "words": len(text.split()),
+                           "last_segment": segment})
+    else:
+        paragraphs[-1]["text"] += " " + text
+        paragraphs[-1]["words"] += len(text.split())
+    paragraphs[-1]["last_segment"] = segment
+
+# A screenshot belongs after the segment that was being spoken when it was
+# taken, which is the last segment starting at or before it. One taken before
+# anyone spoke belongs at the top, where -1 puts it.
+placed = {}
+for shot in shots:
+    offset = shot.get("offset_ms", 0)
+    index = -1
+    for n, paragraph in enumerate(paragraphs):
+        if paragraph["offset"] <= offset:
+            index = n
+        else:
+            break
+    placed.setdefault(index, []).append(shot)
+    spoken = None
+    for segment in segments:
+        if segment.get("offsets", {}).get("from", 0) <= offset:
+            spoken = segment
+        else:
+            break
+    shot["spoken"] = spoken["text"].strip() if spoken else ""
+
+
+def image(shot):
+    return "![Screenshot %s at %s](%s)" % (shot.get("index", "?"), shot.get("elapsed", "00:00"),
+                                           shot.get("path", ""))
+
+
+started = meta.get("started_local") or meta.get("started") or ""
+heading = started[:16].replace("T", " ") if started else "unknown time"
+language = meta.get("lang") or "auto"
+if language == "auto":
+    language = transcript.get("result", {}).get("language") or "unknown"
+
+out = []
+out.append("# Feedback session %s" % heading)
+out.append("")
+summary = "Duration %s. %d screenshot%s. Language %s." % (
+    duration(seconds), len(shots), "" if len(shots) == 1 else "s", language)
+cwd = meta.get("cwd") or ""
+if cwd:
+    summary += " Started in `%s`" % home_relative(cwd)
+    branch = meta.get("branch") or ""
+    summary += " on branch `%s`." % branch if branch else "."
+out.append(summary)
+if meta.get("note"):
+    out.append("")
+    out.append("Note: %s" % meta["note"])
+out.append("")
+out.append("## Transcript")
+out.append("")
+
+for shot in placed.get(-1, []):
+    out.append(image(shot))
+    out.append("")
+
+if not segments or silent:
+    # No audio and no speech is not a failure, and a reader who knows nothing
+    # about the tool has to be told what happened rather than left guessing.
+    out.append("The recording was silent. Nothing was said in this session, or the")
+    out.append("microphone captured nothing. The screenshots below are what there is.")
+    out.append("")
+else:
+    for n, paragraph in enumerate(paragraphs):
+        out.append("[%s] %s" % (mmss(paragraph["offset"] / 1000.0), paragraph["text"]))
+        out.append("")
+        for shot in placed.get(n, []):
+            out.append(image(shot))
+            out.append("")
+
+out.append("## Screenshots")
+out.append("")
+if not shots:
+    out.append("None were taken.")
+else:
+    for shot in shots:
+        line = "%d. `%s` at %s" % (shot.get("index", 0), shot.get("file", ""),
+                                   shot.get("elapsed", "00:00"))
+        words = shot.get("spoken", "").split()
+        if words:
+            quote = " ".join(words[:QUOTE_WORDS])
+            if len(words) > QUOTE_WORDS:
+                quote += " ..."
+            line += ', taken while saying: "%s"' % quote
+        else:
+            line += ", taken before anything was said"
+        out.append(line)
+        out.append("   %s" % shot.get("path", ""))
+out.append("")
+
+with open(os.path.join(session, "feedback.md"), "w", encoding="utf-8") as handle:
+    handle.write("\n".join(out))
+PYTHON
+}
+
+# Mean volume in dBFS, or nothing when it cannot be measured. Digital silence
+# reads as -inf and a muted microphone lands near -91, while a person talking
+# in a quiet room is above -40.
+audio_dbfs() {
+  local wav="$1"
+  [ -s "$wav" ] || return 1
+  ffmpeg -hide_banner -nostdin -i "$wav" -af volumedetect -f null - 2>&1 \
+    | sed -n 's/.*mean_volume: \(-*[0-9.]*\) dB.*/\1/p' | tail -1
+}
+
+# ------------------------------------------------------------------------ stop
+
+# Idempotent, because a person who presses the stop hotkey and then runs the
+# slash command calls this twice, and because the expensive steps must not be
+# repeated or undone the second time.
+cmd_stop() {
+  local session="${1:-}"
+  if [ -z "$session" ]; then
+    session="$(live_session || true)"
+    if [ -z "$session" ] && [ -L "$CURRENT" ]; then
+      session="$(readlink "$CURRENT")"
+    fi
+    [ -n "$session" ] || die "stop: no session is running and none was given" \
+      "recordfeedback stop [session directory]" \
+      "start one with: recordfeedback start. The newest finished one: recordfeedback last"
+  fi
+  [ -d "$session" ] || die "stop: no such session directory" "" "check the path: $session"
+
+  # Only the first stop fixes the end of the window. A second one must not
+  # widen it, or it would sweep up screenshots taken after the session.
+  [ -f "$session/stop.ref" ] || touch "$session/stop.ref"
+
+  stop_recorder "$session"
+  stop_overlay "$session"
+  rm -f "$session/ffmpeg.ctl"
+
+  # collect rescans and rewrites shots.json, and by the second stop the shots
+  # have already moved into the archive, so rerunning it would empty the file.
+  local shots=0
+  if [ -f "$session/shots.json" ]; then
+    shots="$(jq 'length' "$session/shots.json")"
+  else
+    shots="$(cmd_collect "$session")"
+  fi
+
+  local transcribed=1
+  if [ -f "$session/transcript.json" ]; then
+    transcribed=0
+  elif [ ! -s "$session/audio.wav" ]; then
+    echo "recordfeedback: this session has no audio, so there is nothing to transcribe." >&2
+    echo "  look at $session/ffmpeg.log" >&2
+  elif cmd_transcribe "$session"; then
+    transcribed=0
+  fi
+
+  # Whisper hallucinates speech out of silence, so the session is called silent
+  # on the evidence of the audio and the transcript is set aside when it is.
+  local dbfs silent=false
+  dbfs="$(audio_dbfs "$session/audio.wav" || true)"
+  if [ -n "$dbfs" ] && [ "$(python3 -c "print(1 if float('$dbfs') <= -60 else 0)" 2>/dev/null || echo 0)" = 1 ]; then
+    silent=true
+  fi
+  set_meta "$session" silent "$silent"
+
+  cmd_feedback "$session"
+  set_meta "$session" status done
+  rm -f "$CURRENT"
+
+  local words=0
+  [ "$transcribed" -eq 0 ] && words="$(transcript_words "$session")"
+  echo "Session finished."
+  echo "  $(format_mmss "$(elapsed_seconds "$session/start.ref" "$session/stop.ref")") recorded, $words words, $shots screenshot$([ "$shots" = 1 ] || echo s)."
+  echo "  session: $session"
+  # The last line is the path, alone, so the caller can read it without
+  # parsing prose.
+  echo "$session/feedback.md"
+}
+
 # ----------------------------------------------------------------------- usage
 
 usage() {
@@ -650,6 +927,8 @@ main() {
     abort) cmd_abort "$@" ;;
     devices) cmd_devices "$@" ;;
     last) cmd_last "$@" ;;
+    stop) cmd_stop "$@" ;;
+    feedback) cmd_feedback "$@" ;;
     collect) cmd_collect "$@" ;;
     transcribe) cmd_transcribe "$@" ;;
     doctor) cmd_doctor "$@" ;;
