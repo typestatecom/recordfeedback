@@ -50,8 +50,7 @@ guessed again.
   idiom of the language wins: `opts`, `ctx`, `dir`, `pid`, `url` are
   words. An abbreviation coined in this repository is not.
 - Shell is bash with `set -euo pipefail`, and every path that can hold a
-  space is quoted. The screenshot folder is `~/Desktop` and macOS names
-  screenshots with spaces in them.
+  space is quoted. macOS names screenshots with spaces in them.
 - A failure prints what failed, the command that failed and what to do
   about it. This tool runs while the user is talking to their computer
   and cannot watch a terminal.

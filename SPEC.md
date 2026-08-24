@@ -32,9 +32,9 @@ Do not re-derive these. They were checked on 2026-08-24.
 | SDK | `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` |
 | `uv`, `jq`, `python3` | all present under `/opt/homebrew/bin` |
 | avfoundation audio inputs | `[0] MacBook Pro Microphone`, `[1] CASTER Stream Mix 1`, `[2] Microsoft Teams Audio`, `[3] CASTER` |
-| Screenshot folder | `~/Desktop` (`defaults read com.apple.screencapture location` is unset) |
-| Desktop access | **Not granted.** `ls ~/Desktop` fails with `Operation not permitted`. The terminal application needs Files and Folders, Desktop Folder, or Full Disk Access, or no screenshot can ever be collected. `doctor` checks this by listing the folder, because `-d` succeeds on a folder macOS will not let it read. |
-| `~/.claude/commands/` | exists, empty. No global slash command competes with this one. |
+| Screenshot folder | `~/Screenshots`, set with `defaults write com.apple.screencapture location`. It was `~/Desktop`, which is a folder macOS protects. |
+| Protected folder access | **Not granted, and no longer needed.** `ls ~/Desktop` and `ls ~/Documents` both fail with `Operation not permitted`, so screenshots were moved out of the protected folders instead of asking for the permission. `~/Screenshots` and `~/Pictures` read fine. `doctor` still checks the folder by listing it, because `-d` succeeds on a folder macOS will not let it read, and a person who points the setting back at the Desktop needs to be told why nothing is collected. |
+| `~/.claude/commands/` | does not exist yet. `install.sh` creates it. No global slash command competes with this one. |
 
 `whisper-cli` writes ggml and Metal loader lines to stderr before any
 result. The first run of a process loads the embedded Metal library and

@@ -91,3 +91,19 @@ the screenshot folder at all, so those shots are collected whatever their
 timestamp and there is nothing to clean up. That also means a session
 driven from the overlay needs no access to `~/Desktop`, which matters
 because macOS denies it by default.
+
+## 2026-08-24 macOS screenshots go to `~/Screenshots`, not the Desktop
+
+macOS denies this terminal `~/Desktop` and `~/Documents`, so `collect`
+found nothing however correct it was, and the only fixes were a Full Disk
+Access grant the user has to click through, or moving the screenshots out
+of the protected folders. `defaults write com.apple.screencapture
+location ~/Screenshots` costs one command, is undone by one command, and
+needs no permission at all, because `~/Screenshots` and `~/Pictures` are
+not folders macOS protects.
+
+What it costs: it changes where every screenshot on the machine lands,
+not only the ones taken during a session, so the README has to say it and
+has to say how to put it back. `doctor` keeps listing the folder rather
+than trusting the setting, because a person who points it back at the
+Desktop gets silence otherwise.
