@@ -190,3 +190,24 @@ status line stopped naming one folder while counting two places.
 What it costs: a global array in a shell script. The alternative was the
 extension list written out a third time, which is how the two counts
 drifted apart in the first place.
+
+## 2026-08-24 The palette sits above the mark windows, at its own level
+
+`isFloatingPanel = true` puts the panel back at the floating level, so
+setting `.statusBar` before it left the palette below the full screen
+mark windows for the whole session. While idle that is invisible, because
+the mark windows are click through and every press falls to the palette
+underneath. Entering draw mode turns click through off, and from that
+moment the mark window took every click aimed at a tool, at the camera
+and at Stop. Draw mode became a room with the door only a key opens, and
+a person who is talking rather than reading the hotkey list is stuck in
+it. The palette now takes its level after `isFloatingPanel`, one step
+above `.statusBar`, and carries `canHide = false` so that the hide that
+gives the keyboard back on leaving draw mode does not take the clock and
+the Stop button away with it.
+
+What it costs: a test hook in the overlay. Accessibility cannot be
+granted without a person, so no test can post a real click, and
+`11-palette-reachable` asks `NSWindow.windowNumber(at:)` the question a
+click asks instead. That covers which window is in front and not the
+delivery of the event to the button.

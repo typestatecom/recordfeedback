@@ -247,6 +247,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "1" {
       drawSelfTestStroke()
     }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "palette" {
+      probePalette()
+    }
     // Written last, so a test that waits for it knows the windows are up.
     FileManager.default.createFile(atPath: session + "/overlay.ready", contents: nil)
   }
@@ -302,9 +305,18 @@ final class Overlay: NSObject, NSApplicationDelegate {
     window.backgroundColor = .clear
     window.isOpaque = false
     window.hasShadow = true
-    window.level = .statusBar
     window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+    // Set before the level, because this puts the panel back down at the
+    // floating level and would undo it.
     window.isFloatingPanel = true
+    // A level above the mark windows and not merely in front of them. Entering
+    // draw mode makes a mark window key, and from underneath the palette every
+    // press of Stop draws a dot instead, which leaves a key the only way out.
+    window.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+    // Leaving draw mode hides the application to give the keyboard back, and a
+    // hidden palette takes the clock and the Stop button off the screen for the
+    // rest of the session.
+    window.canHide = false
     // The only window that stays clickable while idle. The full screen mark
     // windows stay click through, so everything under them is untouched.
     window.ignoresMouseEvents = false
@@ -802,6 +814,30 @@ final class Overlay: NSObject, NSApplicationDelegate {
     // stops the session this overlay belongs to and never a later one.
     FileManager.default.createFile(atPath: session + "/stop", contents: nil)
     paletteView?.needsDisplay = true
+  }
+
+  // MARK: the palette probe
+
+  // Posting a synthetic click needs Accessibility, so the test asks the window
+  // server the question a click asks: which window is in front at this point.
+  private func probePalette() {
+    setDrawing(true)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+      guard let palette = self.paletteWindow else { return }
+      let centre = NSPoint(x: palette.frame.midX, y: palette.frame.midY)
+      var lines = [
+        "palette \(palette.windowNumber)",
+        "hit \(NSWindow.windowNumber(at: centre, belowWindowWithWindowNumber: 0))",
+      ]
+      for window in self.markWindows { lines.append("mark \(window.windowNumber)") }
+      self.setDrawing(false)
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+        lines.append("visible-after-drawing \(palette.isVisible ? 1 : 0)")
+        try? (lines.joined(separator: "\n") + "\n")
+          .write(toFile: self.session + "/palette.probe", atomically: true,
+                 encoding: .utf8)
+      }
+    }
   }
 
   // MARK: the pixel test
