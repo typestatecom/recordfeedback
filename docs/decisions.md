@@ -337,3 +337,34 @@ looked at.
 What it costs: a short drag at a wide setting is nearly all head, since
 staying inside the two ends wins over keeping the shaft. The tail is flat
 rather than rounded.
+
+## 2026-08-24 The palette carries two rows, anchored at its right hand end
+
+The row held the whole tray of tools, colours and widths for the entire
+session, and a session is mostly spent talking. The width was fixed at
+720 for exactly one reason: draw mode is entered by clicking a control in
+this row, so anything that moved as it started moved out from under the
+cursor that started it, and Stop moving is a click that draws a mark
+instead of ending the session.
+
+That reason is served by anchoring rather than by a fixed width. The
+window now grows leftwards from its right hand end, 404 idle and 852
+drawing, and the controls that exist in both rows are laid out from the
+right edge inwards, so they sit at the same place on the screen in both.
+`14-palette-layout` asserts that of a real palette by name rather than by
+counting along the row, since what changes between the two layouts is how
+many controls sit between them.
+
+Idle the row carries the clock, one Draw button, the two capture buttons,
+the count and Stop. Every control has button chrome and names its key
+underneath itself, because the user of this tool is mid sentence and
+cannot go hunting for a tooltip. The hints are text under a control
+rather than inside it, so a hint wider than its control collides with its
+neighbour's and neither can be read: the probe registers the hint
+rectangles too, and `opt-cmd-X` and `opt-cmd-R` were the first pair to
+collide. They are drawn with the key symbols.
+
+What it costs: the row is 52 tall rather than 46, to carry the hints. The
+saved position moved to a new key, so the palette starts once in its
+default place for anyone who had moved it. A region capture now has a
+button, which is one more control in both rows.

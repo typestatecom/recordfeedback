@@ -309,6 +309,14 @@ Inside draw mode, plain keys with no modifier:
 | `esc` | leave draw mode, or commit the text being typed |
 | the active tool's own key | leave draw mode |
 
+Leaving draw mode hides the application, which is what hands the keyboard
+back to whatever the user is talking about. Both the mark windows and the
+palette are exempt from that hiding with `canHide = false`. Putting the
+pen down is not rubbing the drawing out: a user who circles something and
+then stops drawing to talk about it would otherwise be left pointing at
+nothing, and the shutter frame, which is drawn on the mark windows, would
+never be seen at all outside draw mode.
+
 Text is a shape like any other: a point, a colour, a size and a string.
 Click places the caret, typing edits it, `esc` or `return` commits it and
 clicking elsewhere commits it and starts another. An empty string commits
@@ -336,22 +344,38 @@ a heads-up display that fades:
 - A Done button, shown only while drawing, which leaves draw mode. The
   way out has to be visible at the moment the overlay is holding every
   click on the screen, not only written in a key list that scrolled away.
-  Its space in the row is held whether it is shown or not, because draw
-  mode is entered by clicking a tool and everything to the right of it
-  would otherwise move out from under the cursor that just started it.
 - Six colour swatches and a width control, both reflecting the current
   state, because the keyboard shortcuts change state that is otherwise
-  invisible.
-- A camera button for the full screen shot, the number of shots taken so
-  far, and a stop button.
-- One row, 720 by 46, wide enough for the state that carries the Done
-  button. Every control is a rectangle registered while the row is drawn,
-  so `14-palette-layout` can assert that none overlaps another and none
-  falls off the end. A camera button under the Stop button is a
-  screenshot key that ends the session.
+  invisible. The width is shown as a dot at the size it will draw at,
+  because a number says nothing about the mark it is about to make.
+- A camera button for the full screen shot, a second one for a region,
+  the number of shots taken so far, and a stop button.
+- Two rows, not one. The tools, the colours and the width belong to draw
+  mode, and a session is mostly spent talking, so idle the row carries
+  only the clock, one Draw button, the two capture buttons, the count and
+  Stop. It is 404 wide idle and 852 drawing, and it grows leftwards: the
+  right hand end is the anchor, so every control that exists in both rows
+  sits at the same place on the screen in both. Draw mode is entered by
+  clicking in this row, and a control that moves as it starts moves out
+  from under the cursor that started it. Stop moving is a click that
+  draws a mark instead of ending the session.
+- Every control names its key underneath itself, at 8 points, as well as
+  in its tooltip. The keys are the whole point of this tool and its user
+  is talking, not hunting for a tooltip.
+- Every control is a rectangle registered while the row is drawn, and so
+  is every key hint, so `14-palette-layout` can assert of both rows that
+  no two controls overlap, no two hints collide, nothing falls off the
+  end, every control has a tooltip, and the shared controls have not
+  moved between the two.
+- The row sits at 70% opacity while idle and full strength while the pen
+  is down or the pointer is on it. It is over the user's work for the
+  whole session.
 - The palette window alone has `ignoresMouseEvents = false` while idle.
   The full screen mark windows stay click through, so the palette can be
   clicked while everything under it is untouched.
+- The position remembered between sessions is the right hand end, not the
+  left, because that is the end that stays put when the row changes
+  width.
 
 The palette is furniture, so it is hidden for the instant of a capture,
 with the crosshair, and put back after. That is only possible because the
@@ -361,14 +385,24 @@ overlay owns the capture keys.
 land in the recording of the person talking. That leaves a successful
 screenshot looking exactly like a key that did nothing, so once the file
 is on disk the overlay flashes a white frame around every screen for
-180ms. It is drawn after the capture, so it can never appear in the shot
-it is confirming, and it is drawn even when the marks are hidden. A full
-screen capture that writes no file prints the Screen Recording fix; a
-region capture that writes none does not, because escape cancels one.
+350ms, and lights the camera button in the palette while it does. The
+frame is at the four edges of the screen and the eye of someone mid
+sentence is at neither edge, so the confirmation is repeated on the
+control that was clicked. It is drawn after the capture, so it can never
+appear in the shot it is confirming, and it is drawn even when the marks
+are hidden. A full screen capture that writes no file prints the Screen
+Recording fix; a region capture that writes none does not, because escape
+cancels one.
 
 The drawing model is a list of shapes. A shape is a tool, a colour, a
 width, a list of points and, for text, a string. Freehand appends points on drag. Arrow and
-rectangle keep two points and update the second one while dragging.
+rectangle keep two points and update the second one while dragging. The
+arrow is sized from a width that is usually small, so its head is clamped
+to the length of the drag and its shaft is butt capped and stopped inside
+the head: at the wide end a round cap puts half a width of ink past the
+point the user dragged to, and an unclamped head on a short drag runs
+back out through the tail. `17-wide-arrow` renders arrows through the
+drawing code and counts the ink outside the two points.
 Redraw everything in `draw(_:)`. Undo removes the last shape. This is
 small enough that nothing more clever is needed, and a shape list is
 what makes undo one line.

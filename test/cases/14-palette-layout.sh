@@ -1,8 +1,10 @@
-# The palette is one row of controls at a fixed width, and every control added
-# to it pushes the ones after it along. Nothing about that is visible from the
-# source, so the row is measured: no control may sit on top of another and none
-# may fall off the end. A camera button under the Stop button is a screenshot
-# key that stops the session.
+# The row carries two layouts: the clock, the way into draw mode, the capture
+# buttons and Stop while the user is talking, and the whole tray of tools,
+# colours and widths while the pen is down. Draw mode is entered by clicking a
+# control in this row, so every control that exists in both layouts has to sit
+# at the same place on the screen in both, or it moves out from under the
+# cursor that started it. None of that is visible from the source, so it is
+# read out of a real palette instead.
 . "$REPO/test/lib.sh"
 
 OVERLAY="$REPO/bin/rf-overlay"
@@ -44,32 +46,57 @@ trap - EXIT
 contents="$(cat "$report")"
 field() { printf '%s\n' "$contents" | sed -n "s/^$1 //p"; }
 
-# Five tools, six colours, thinner, thicker, camera, Stop and Done.
-[ "$(field controls)" -ge 16 ] \
-  || fail "the palette registered only $(field controls) clickable controls, so
-  the probe did not see the row it was meant to measure. The probe said:
+for state in idle drawing; do
+  assert_eq "$(field "$state-overlaps")" "0" \
+    "no two controls overlap in the $state row. The probe said:
 $contents"
 
-assert_eq "$(field overlaps)" "0 " \
-  "no two controls in the palette overlap. The pairs are given as minX:maxX of
-  each. The probe said:
+  assert_eq "$(field "$state-outside")" "0" \
+    "every control is inside the window in the $state row. A control past the
+  end of the window is drawn but can never be clicked. The probe said:
 $contents"
 
-assert_eq "$(field outside)" "0" \
-  "every control is inside the palette window. A control past the end of the
-  window is drawn but can never be clicked. The probe said:
+  assert_eq "$(field "$state-hint-overlaps")" "0" \
+    "no two key hints in the $state row run into each other. The hints are
+  drawn under the controls rather than inside them, so a hint wider than the
+  control it belongs to collides with its neighbour and neither can be read.
+  The probe said:
 $contents"
 
-assert_eq "$(field camera-idle)" "$(field camera-drawing)" \
-  "the controls to the right of the tools sit in the same place whether draw
-  mode is on or off. Draw mode is entered by clicking a tool, so anything that
-  moves when it starts moves out from under the cursor that started it. The
+  assert_eq "$(field "$state-untipped")" "0" \
+    "every control in the $state row names itself when the pointer rests on it.
+  The keys are the whole point of this tool and a control that never says
+  which key reaches it is a control the user has to be told about. The probe
+  said:
+$contents"
+done
+
+# Stop, the two capture buttons and the shot count exist in both rows.
+for control in stop camera region shots; do
+  assert_eq "$(field "idle-at-$control")" "$(field "drawing-at-$control")" \
+    "the $control control sits at the same place on the screen whether the pen
+  is down or not. Draw mode is entered by clicking in this row, so a control
+  that moves as it starts moves out from under the cursor that started it, and
+  Stop moving is a click that draws a mark instead of ending the session. The
   probe said:
 $contents"
+done
 
-[ "$(field controls)" -eq "$(($(field controls-idle) + 1))" ] \
-  || fail "draw mode should add exactly one control, the way out of it, and it
-  added $(($(field controls) - $(field controls-idle))). The probe said:
+[ "$(field idle-controls)" -lt "$(field drawing-controls)" ] \
+  || fail "the idle row carries $(field idle-controls) controls and the drawing
+  row $(field drawing-controls). The tools, the colours and the width belong to
+  draw mode, and holding them on the screen for a whole session puts them over
+  the work the user is talking about. The probe said:
 $contents"
 
-echo "the palette row fits, with $(field controls) controls and no overlap"
+[ "$(field idle-window)" -lt "$(field drawing-window)" ] \
+  || fail "the window is $(field idle-window) wide idle and
+  $(field drawing-window) drawing, so it is not giving the screen back while
+  the user is talking. The probe said:
+$contents"
+
+assert_contains "$(field tips)" "opt-cmd-X" \
+  "the capture buttons name their keys. The probe said:
+$contents"
+
+echo "both rows fit, and the controls they share do not move between them"

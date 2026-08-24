@@ -154,9 +154,30 @@ final class PaletteView: NSView, NSViewToolTipOwner {
 
   override var isFlipped: Bool { false }
 
+  // The row sits over the work for the whole session. It steps back while the
+  // user is talking and comes forward when they reach for it.
+  private(set) var pointerInside = false
+
   override func draw(_ dirtyRect: NSRect) {
     owner?.drawPalette(in: self)
     syncTips()
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    for area in trackingAreas { removeTrackingArea(area) }
+    addTrackingArea(NSTrackingArea(
+      rect: bounds, options: [.mouseEnteredAndExited, .activeAlways], owner: self))
+  }
+
+  override func mouseEntered(with event: NSEvent) {
+    pointerInside = true
+    owner?.paletteAttentionChanged()
+  }
+
+  override func mouseExited(with event: NSEvent) {
+    pointerInside = false
+    owner?.paletteAttentionChanged()
   }
 
   func clearHits() { hits.removeAll() }
@@ -173,6 +194,23 @@ final class PaletteView: NSView, NSViewToolTipOwner {
   // The label a control names itself with when the pointer rests on it. A
   // control the row never names is a control only its author can find.
   var tipTexts: [String] { tips.map { $0.1 } }
+
+  // Where a named control ended up. The probe asks for controls by name
+  // because what changes between the two layouts is how many sit between them.
+  private(set) var namedRects: [String: NSRect] = [:]
+
+  func clearNames() { namedRects.removeAll() }
+
+  // Where the key hints were actually drawn. They are text under a button
+  // rather than inside it, so a hint wider than its own control runs into its
+  // neighbour's, and neither of them can be read.
+  private(set) var hintRects: [NSRect] = []
+
+  func clearHints() { hintRects.removeAll() }
+
+  func addHint(_ rect: NSRect) { hintRects.append(rect) }
+
+  func name(_ key: String, _ rect: NSRect) { namedRects[key] = rect }
 
   func clearTips() { tips.removeAll() }
 
@@ -368,12 +406,18 @@ final class Overlay: NSObject, NSApplicationDelegate {
     redrawMarks()
   }
 
+  // The controls that exist in both rows, and so have to sit still between
+  // them. Draw mode is entered by clicking in this row.
+  let anchoredControls = ["shots", "region", "camera", "stop"]
+
+  private let paletteHeight: CGFloat = 52
+  private var paletteWidth: CGFloat { drawing ? 852 : 404 }
+
   private func buildPalette() {
-    // Wide enough for draw mode, which is the widest the row gets because it is
-    // the only state carrying the Done button. The width does not change with
-    // the state: a control that moves out from under the cursor as draw mode
-    // starts is a control that gets mis-clicked.
-    let size = NSSize(width: 720, height: 46)
+    // The idle width. The tools, the colours and the width control belong to
+    // draw mode, and the row grows leftwards to take them: the right hand end
+    // is the anchor, so Stop and the capture buttons never move.
+    let size = NSSize(width: paletteWidth, height: paletteHeight)
     let window = PaletteWindow(contentRect: NSRect(origin: .zero, size: size),
                                styleMask: [.borderless, .nonactivatingPanel],
                                backing: .buffered, defer: false)
@@ -406,17 +450,19 @@ final class Overlay: NSObject, NSApplicationDelegate {
     paletteView = view
   }
 
+  // The saved position is the right hand end and not the left, because that is
+  // the end that stays put when the row changes width.
   private func paletteOrigin(for size: NSSize) -> NSPoint {
     let defaults = UserDefaults.standard
-    if let saved = defaults.string(forKey: "palette.origin") {
-      let point = NSPointFromString(saved)
-      for screen in NSScreen.screens where screen.frame.contains(point) {
-        // The origin is the bottom left corner, so a position saved by an older
-        // and narrower palette can put the right hand end, where Stop lives,
-        // past the edge of the screen.
+    if let saved = defaults.string(forKey: "palette.anchor") {
+      let anchor = NSPointFromString(saved)
+      for screen in NSScreen.screens where screen.frame.contains(anchor) {
         let limit = screen.frame
-        return NSPoint(x: min(point.x, limit.maxX - size.width),
-                       y: min(point.y, limit.maxY - size.height))
+        // Room for the wide row, so that entering draw mode never runs the
+        // left hand end off the edge of the screen.
+        let right = min(max(anchor.x, limit.minX + 852), limit.maxX)
+        return NSPoint(x: right - size.width,
+                       y: min(anchor.y, limit.maxY - size.height))
       }
     }
     guard let screen = NSScreen.main else { return NSPoint(x: 100, y: 100) }
@@ -425,7 +471,29 @@ final class Overlay: NSObject, NSApplicationDelegate {
   }
 
   func rememberPalettePosition(_ origin: NSPoint) {
-    UserDefaults.standard.set(NSStringFromPoint(origin), forKey: "palette.origin")
+    let anchor = NSPoint(x: origin.x + (paletteWindow?.frame.width ?? 0), y: origin.y)
+    UserDefaults.standard.set(NSStringFromPoint(anchor), forKey: "palette.anchor")
+  }
+
+  // Growing the row leftwards, so the end the user's cursor is at stays where
+  // it is. Called whenever the set of controls changes.
+  private func resizePalette() {
+    guard let window = paletteWindow else { return }
+    let right = window.frame.maxX
+    let size = NSSize(width: paletteWidth, height: paletteHeight)
+    window.setFrame(NSRect(x: right - size.width, y: window.frame.minY,
+                           width: size.width, height: size.height),
+                    display: true)
+    paletteView?.frame = NSRect(origin: .zero, size: size)
+    paletteView?.needsDisplay = true
+  }
+
+  // Full strength while the pen is down or the pointer is on the row, and a
+  // step back the rest of the time: the row is over the work for the whole
+  // session and most of that session is spent talking, not clicking.
+  func paletteAttentionChanged() {
+    let wanted = drawing || (paletteView?.pointerInside ?? false) ? 1.0 : 0.7
+    paletteWindow?.animator().alphaValue = wanted
   }
 
   private func installHotkeys() {
@@ -479,7 +547,8 @@ final class Overlay: NSObject, NSApplicationDelegate {
       }
       NSApp.hide(nil)
     }
-    paletteView?.needsDisplay = true
+    resizePalette()
+    paletteAttentionChanged()
   }
 
   // The palette's own way out, so that leaving draw mode is never only a key.
@@ -744,137 +813,228 @@ final class Overlay: NSObject, NSApplicationDelegate {
 
   func drawPalette(in view: PaletteView) {
     view.clearHits()
+    view.clearTips()
+    view.clearNames()
+    view.clearHints()
     let bounds = view.bounds
-    let background = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1),
-                                  xRadius: 10, yRadius: 10)
-    NSColor(srgbRed: 0.08, green: 0.08, blue: 0.09, alpha: 0.92).setFill()
-    background.fill()
-    NSColor(white: 1, alpha: 0.18).setStroke()
-    background.lineWidth = 1
-    background.stroke()
+    let shell = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1),
+                             xRadius: 13, yRadius: 13)
+    NSColor(srgbRed: 0.09, green: 0.09, blue: 0.11, alpha: 0.94).setFill()
+    shell.fill()
+    NSColor(white: 1, alpha: 0.14).setStroke()
+    shell.lineWidth = 1
+    shell.stroke()
 
-    let middle = bounds.midY
-    var x: CGFloat = 12
+    // Every control sits on this line and names its key underneath it, so the
+    // keys are readable without hovering over anything. This tool is used by
+    // someone talking to their computer, who cannot go looking for a tooltip.
+    let mid = bounds.midY + 4
+
+    drawAnchoredEnd(in: view, bounds: bounds, mid: mid)
+    var x: CGFloat = 14
 
     // The red dot and the clock are the proof that recording is live, which a
     // silent tool cannot give a person who is talking instead of watching.
-    let dot = NSRect(x: x, y: middle - 5, width: 10, height: 10)
+    let dot = NSRect(x: x, y: mid - 5, width: 10, height: 10)
     NSColor(srgbRed: 1, green: 0.23, blue: 0.19, alpha: pulseOn ? 1.0 : 0.35).setFill()
     NSBezierPath(ovalIn: dot).fill()
-    x += 20
+    x += 18
 
     let elapsed = Int(Date().timeIntervalSince(startedAt))
     label(String(format: "%02d:%02d", elapsed / 60, elapsed % 60),
-          at: NSPoint(x: x, y: middle - 8), size: 14, weight: .medium,
+          at: NSPoint(x: x, y: mid - 8), size: 14, weight: .medium,
           color: NSColor(white: 1, alpha: 0.95))
-    x += 52
+    x += 48
 
-    separator(at: x, middle: middle); x += 11
+    separator(at: x, middle: mid); x += 13
 
-    view.clearTips()
-    for candidate in Tool.allCases {
-      let rect = NSRect(x: x, y: middle - 14, width: 28, height: 28)
-      let active = candidate == tool && drawing
-      if active {
-        NSColor(srgbRed: 0.20, green: 0.50, blue: 1.0, alpha: 0.9).setFill()
-      } else {
-        NSColor(white: 1, alpha: 0.10).setFill()
-      }
-      NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
-      drawToolIcon(candidate, in: rect,
-                   color: NSColor(white: 1, alpha: active ? 1.0 : 0.7))
-      view.addHit(rect) { [weak self] in self?.select(candidate) }
-      // A drawn shape says what a tool does but not what key reaches it, and
-      // the letters this replaced were the only place the keys were written.
-      view.addTip(rect, candidate.name + " (" + candidate.letter.lowercased() + ")")
-      x += 32
-    }
-
-    x += 3
-
-    // Leaving draw mode is the thing a person needs most and guesses least, so
-    // it is a button and not only a key. Its space is held whether it is shown
-    // or not: draw mode is entered by clicking a tool, and everything to the
-    // right of this would otherwise jump out from under the cursor as it starts.
     if drawing {
-      let done = NSRect(x: x, y: middle - 13, width: 52, height: 26)
-      NSColor(white: 1, alpha: 0.18).setFill()
-      NSBezierPath(roundedRect: done, xRadius: 6, yRadius: 6).fill()
-      label("Done", at: NSPoint(x: done.minX + 8, y: middle - 8), size: 13,
-            weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
-      view.addHit(done) { [weak self] in self?.leaveDrawing() }
-      view.addTip(done, "stop drawing (esc)")
-    }
-    x += 56
-
-    separator(at: x, middle: middle); x += 11
-
-    for (index, color) in palette.enumerated() {
-      let rect = NSRect(x: x, y: middle - 9, width: 18, height: 18)
-      color.setFill()
-      NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
-      if index == colorIndex {
-        NSColor.white.setStroke()
-        let ring = NSBezierPath(roundedRect: rect.insetBy(dx: -3, dy: -3),
-                                xRadius: 6, yRadius: 6)
-        ring.lineWidth = 1.5
-        ring.stroke()
+      for candidate in Tool.allCases {
+        let rect = NSRect(x: x, y: mid - 15, width: 30, height: 30)
+        control(rect, in: view, on: candidate == tool,
+                key: candidate.letter.lowercased(),
+                tip: candidate.name + " (" + candidate.letter.lowercased() + ")") {
+          [weak self] in self?.select(candidate)
+        }
+        drawToolIcon(candidate, in: rect,
+                     color: NSColor(white: 1, alpha: candidate == tool ? 1.0 : 0.72))
+        x += 33
       }
-      view.addHit(rect.insetBy(dx: -3, dy: -3)) { [weak self] in self?.pick(index) }
-      // The swatch is 18 wide and its target is grown to 24, so the step has to
-      // clear 24 or the seam between two colours belongs to both of them.
-      x += 26
+      x += 5
+
+      // Leaving draw mode is the thing a person needs most and guesses least,
+      // so it is a button and not only a key.
+      let done = NSRect(x: x, y: mid - 15, width: 56, height: 30)
+      control(done, in: view, on: false, key: "esc", tip: "stop drawing (esc)") {
+        [weak self] in self?.leaveDrawing()
+      }
+      label("Done", at: NSPoint(x: done.midX - 19, y: mid - 7), size: 13,
+            weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
+      x += 62
+
+      separator(at: x, middle: mid); x += 13
+
+      for (index, colour) in palette.enumerated() {
+        let swatch = NSRect(x: x, y: mid - 10, width: 20, height: 20)
+        let target = swatch.insetBy(dx: -3, dy: -5)
+        colour.setFill()
+        NSBezierPath(roundedRect: swatch, xRadius: 5, yRadius: 5).fill()
+        if index == colorIndex {
+          NSColor.white.setStroke()
+          let ring = NSBezierPath(roundedRect: swatch.insetBy(dx: -3, dy: -3),
+                                  xRadius: 7, yRadius: 7)
+          ring.lineWidth = 1.5
+          ring.stroke()
+        }
+        view.addHit(target) { [weak self] in self?.pick(index) }
+        view.addTip(target, "colour \(index + 1)")
+        hint("\(index + 1)", under: swatch, view: view)
+        // The swatch target is grown to 26, so the step has to clear it or the
+        // seam between two colours belongs to both of them.
+        x += 27
+      }
+
+      x += 5
+      separator(at: x, middle: mid); x += 13
+
+      let thinner = NSRect(x: x, y: mid - 13, width: 24, height: 26)
+      control(thinner, in: view, on: false, key: "[", tip: "thinner ([)") {
+        [weak self] in self?.widen(-1)
+      }
+      label("\u{2212}", at: NSPoint(x: thinner.midX - 5, y: mid - 8), size: 14,
+            weight: .semibold, color: NSColor(white: 1, alpha: 0.85))
+      x += 28
+
+      // The number said nothing about the mark it was going to make. The dot
+      // is the mark, at the size it will be drawn at.
+      let preview = NSRect(x: x, y: mid - 13, width: 30, height: 26)
+      let size = min(width, 22)
+      palette[colorIndex].setFill()
+      NSBezierPath(ovalIn: NSRect(x: preview.midX - size / 2, y: preview.midY - size / 2,
+                                  width: size, height: size)).fill()
+      hint(String(format: "%.0f", width), under: preview, view: view)
+      x += 34
+
+      let thicker = NSRect(x: x, y: mid - 13, width: 24, height: 26)
+      control(thicker, in: view, on: false, key: "]", tip: "thicker (])") {
+        [weak self] in self?.widen(+1)
+      }
+      label("+", at: NSPoint(x: thicker.midX - 5, y: mid - 8), size: 14,
+            weight: .semibold, color: NSColor(white: 1, alpha: 0.85))
+      x += 28
+    } else {
+      // One way in, named, so the row does not have to carry the whole tray
+      // while the user is talking.
+      let draw = NSRect(x: x, y: mid - 15, width: 78, height: 30)
+      control(draw, in: view, on: false, key: "\u{2325}\u{2318}A", tip: "draw (opt-cmd-A)") {
+        [weak self] in self?.setDrawing(true)
+      }
+      drawToolIcon(tool, in: NSRect(x: draw.minX + 4, y: draw.minY, width: 24,
+                                    height: draw.height),
+                   color: NSColor(white: 1, alpha: 0.9))
+      label("Draw", at: NSPoint(x: draw.minX + 28, y: mid - 7), size: 13,
+            weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
     }
 
-    x += 3
-    separator(at: x, middle: middle); x += 11
+    if editing != nil {
+      label("typing", at: NSPoint(x: 14, y: bounds.maxY - 13), size: 9,
+            weight: .regular,
+            color: NSColor(srgbRed: 1, green: 0.9, blue: 0.3, alpha: 0.9))
+    } else if marksHidden {
+      label("marks hidden", at: NSPoint(x: 14, y: bounds.maxY - 13), size: 9,
+            weight: .regular, color: NSColor(white: 1, alpha: 0.6))
+    }
+  }
 
-    let thinner = NSRect(x: x, y: middle - 11, width: 22, height: 22)
-    button("-", in: thinner, view: view) { [weak self] in self?.widen(-1) }
-    x += 25
-    label(String(format: "%.0f", width), at: NSPoint(x: x + 4, y: middle - 7),
-          size: 12, weight: .medium, color: NSColor(white: 1, alpha: 0.85))
-    x += 26
-    let thicker = NSRect(x: x, y: middle - 11, width: 22, height: 22)
-    button("+", in: thicker, view: view) { [weak self] in self?.widen(+1) }
-    x += 25
+  // Laid out from the right hand edge inwards, because these are the controls
+  // that have to sit still while everything to their left comes and goes.
+  private func drawAnchoredEnd(in view: PaletteView, bounds: NSRect, mid: CGFloat) {
+    var right = bounds.maxX - 14
 
-    x += 3
-    separator(at: x, middle: middle); x += 11
+    let stop = NSRect(x: right - 54, y: mid - 15, width: 54, height: 30)
+    NSColor(srgbRed: 0.85, green: 0.20, blue: 0.17, alpha: 0.95).setFill()
+    NSBezierPath(roundedRect: stop, xRadius: 7, yRadius: 7).fill()
+    label("Stop", at: NSPoint(x: stop.midX - 16, y: mid - 7), size: 13,
+          weight: .semibold, color: .white)
+    view.addHit(stop) { [weak self] in self?.stopSession() }
+    view.addTip(stop, "end the session (opt-cmd-S)")
+    view.name("stop", stop)
+    hint("\u{2325}\u{2318}S", under: stop, view: view)
+    right = stop.minX - 12
+
+    let count = NSRect(x: right - 46, y: mid - 9, width: 46, height: 18)
+    label(shots == 1 ? "1 shot" : "\(shots) shots",
+          at: NSPoint(x: count.minX, y: mid - 7), size: 12, weight: .medium,
+          color: NSColor(white: 1, alpha: shots > 0 ? 0.85 : 0.4))
+    view.name("shots", count)
+    right = count.minX - 10
+
+    let region = NSRect(x: right - 32, y: mid - 15, width: 32, height: 30)
+    control(region, in: view, on: false, key: "\u{2325}\u{2318}R",
+            tip: "screenshot a region (opt-cmd-R)") {
+      [weak self] in self?.capture(region: true)
+    }
+    drawRegionIcon(in: region, color: NSColor(white: 1, alpha: 0.85))
+    view.name("region", region)
+    right = region.minX - 7
 
     // The frame that confirms a shot is drawn at the edges of the screen, and
     // the eye of someone mid sentence is on neither edge. The row is where they
     // last looked, so the confirmation is repeated on the control itself.
-    let camera = NSRect(x: x, y: middle - 13, width: 30, height: 26)
-    if shutterFlash {
-      NSColor(srgbRed: 0.20, green: 0.50, blue: 1.0, alpha: 0.9).setFill()
+    let camera = NSRect(x: right - 32, y: mid - 15, width: 32, height: 30)
+    control(camera, in: view, on: shutterFlash, key: "\u{2325}\u{2318}X",
+            tip: "screenshot (opt-cmd-X)") {
+      [weak self] in self?.capture(region: false)
+    }
+    drawCameraIcon(in: camera, color: NSColor(white: 1, alpha: 0.9))
+    view.name("camera", camera)
+  }
+
+  // The chrome that says a thing can be clicked, and the key underneath that
+  // says what reaches it without the mouse.
+  private func control(_ rect: NSRect, in view: PaletteView, on: Bool,
+                       key: String, tip: String, action: @escaping () -> Void) {
+    if on {
+      NSColor(srgbRed: 0.20, green: 0.50, blue: 1.0, alpha: 0.92).setFill()
     } else {
-      NSColor(white: 1, alpha: 0.10).setFill()
+      NSColor(white: 1, alpha: 0.13).setFill()
     }
-    NSBezierPath(roundedRect: camera, xRadius: 6, yRadius: 6).fill()
-    drawCameraIcon(in: camera, color: NSColor(white: 1, alpha: 0.85))
-    view.addHit(camera) { [weak self] in self?.capture(region: false) }
-    view.addTip(camera, "screenshot (opt-cmd-X)")
-    x += 34
+    let shape = NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7)
+    shape.fill()
+    NSColor(white: 1, alpha: on ? 0.35 : 0.16).setStroke()
+    shape.lineWidth = 1
+    shape.stroke()
+    view.addHit(rect, action)
+    view.addTip(rect, tip)
+    hint(key, under: rect, view: view)
+  }
 
-    label("\(shots)", at: NSPoint(x: x, y: middle - 7), size: 12,
-          weight: .medium, color: NSColor(white: 1, alpha: 0.85))
-    x += 22
+  private func hint(_ text: String, under rect: NSRect, view: PaletteView) {
+    let font = NSFont.systemFont(ofSize: 8, weight: .medium)
+    let size = (text as NSString).size(withAttributes: [.font: font])
+    let at = NSPoint(x: rect.midX - size.width / 2, y: 4)
+    label(text, at: at, size: 8, weight: .medium,
+          color: NSColor(white: 1, alpha: 0.45))
+    view.addHint(NSRect(origin: at, size: size))
+  }
 
-    let stop = NSRect(x: bounds.maxX - 62, y: middle - 13, width: 50, height: 26)
-    NSColor(srgbRed: 0.85, green: 0.20, blue: 0.17, alpha: 0.95).setFill()
-    NSBezierPath(roundedRect: stop, xRadius: 6, yRadius: 6).fill()
-    label("Stop", at: NSPoint(x: stop.midX - 15, y: middle - 8), size: 13,
-          weight: .semibold, color: .white)
-    view.addHit(stop) { [weak self] in self?.stopSession() }
-
-    if editing != nil {
-      label("typing", at: NSPoint(x: 12, y: 2), size: 9, weight: .regular,
-            color: NSColor(srgbRed: 1, green: 0.9, blue: 0.3, alpha: 0.9))
-    } else if marksHidden {
-      label("marks hidden", at: NSPoint(x: 12, y: 2), size: 9, weight: .regular,
-            color: NSColor(white: 1, alpha: 0.6))
-    }
+  // A dashed corner rather than a full frame, which is what a region capture
+  // looks like while it is being dragged out.
+  private func drawRegionIcon(in rect: NSRect, color: NSColor) {
+    let box = NSRect(x: rect.midX - 8, y: rect.midY - 7, width: 16, height: 14)
+    color.setStroke()
+    let path = NSBezierPath(rect: box)
+    path.lineWidth = 1.5
+    path.setLineDash([3, 2.5], count: 2, phase: 0)
+    path.stroke()
+    color.setFill()
+    let cross = NSBezierPath()
+    cross.move(to: NSPoint(x: box.midX - 3, y: box.midY))
+    cross.line(to: NSPoint(x: box.midX + 3, y: box.midY))
+    cross.move(to: NSPoint(x: box.midX, y: box.midY - 3))
+    cross.line(to: NSPoint(x: box.midX, y: box.midY + 3))
+    cross.lineWidth = 1.5
+    cross.stroke()
   }
 
   // A ring on its own reads as a colour swatch, a record button or a full stop,
@@ -899,15 +1059,6 @@ final class Overlay: NSObject, NSApplicationDelegate {
                                            width: 5, height: 5))
     ring.lineWidth = 1.5
     ring.stroke()
-  }
-
-  private func button(_ text: String, in rect: NSRect, view: PaletteView,
-                      action: @escaping () -> Void) {
-    NSColor(white: 1, alpha: 0.10).setFill()
-    NSBezierPath(roundedRect: rect, xRadius: 5, yRadius: 5).fill()
-    label(text, at: NSPoint(x: rect.midX - 4, y: rect.midY - 8), size: 14,
-          weight: .semibold, color: NSColor(white: 1, alpha: 0.8))
-    view.addHit(rect, action)
   }
 
   // Five letters in a row read as one word and not as five controls, which is
@@ -1142,46 +1293,64 @@ final class Overlay: NSObject, NSApplicationDelegate {
     }
   }
 
-  // Draw mode is the widest the palette ever gets, because it is the only
-  // state that shows the way out of it, so it is the state the row has to fit.
+  // The row carries two layouts now, and the thing that has to hold across
+  // both of them is where the controls sit on the screen rather than where
+  // they sit in the window: the window itself changes width. Draw mode is
+  // entered by clicking a control in this row, so anything that moves as it
+  // starts moves out from under the cursor that started it.
   private func probeLayout() {
     DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-      guard let view = self.paletteView else { return }
-      view.display()
-      // Stop is anchored to the right hand end and the camera is the control
-      // before it, so its position is where every width added to the left of it
-      // shows up.
-      let idleCamera = view.hitRects.dropLast().last.map { Int($0.minX) } ?? -1
-      let idleCount = view.hitRects.count
+      guard let view = self.paletteView, let window = self.paletteWindow else { return }
 
-      self.setDrawing(true)
-      view.display()
-      let rects = view.hitRects
-      var overlaps: [String] = []
-      var outside = 0
-      for (index, one) in rects.enumerated() {
-        if !view.bounds.contains(one) { outside += 1 }
-        for other in rects[(index + 1)...] where one.intersects(other) {
-          overlaps.append("\(Int(one.minX)):\(Int(one.maxX))"
-                          + "/\(Int(other.minX)):\(Int(other.maxX))")
+      func snapshot(_ tag: String) -> [String] {
+        view.display()
+        let origin = window.frame.minX
+        let rects = view.hitRects
+        var overlaps = 0
+        var outside = 0
+        for (index, one) in rects.enumerated() {
+          if !view.bounds.contains(one) { outside += 1 }
+          for other in rects[(index + 1)...] where one.intersects(other) { overlaps += 1 }
         }
+        // Named rather than counted from the end, because the number of
+        // controls between them is exactly what changes between the layouts.
+        let anchors = self.anchoredControls.map { name -> String in
+          let x = view.namedRects[name].map { Int(origin + $0.minX) } ?? -1
+          return "\(tag)-at-\(name) \(x)"
+        }
+        var hintOverlaps = 0
+        let hints = view.hintRects
+        for (index, one) in hints.enumerated() {
+          for other in hints[(index + 1)...] where one.intersects(other) {
+            hintOverlaps += 1
+          }
+        }
+        return ["\(tag)-window \(Int(window.frame.width))",
+                "\(tag)-hint-overlaps \(hintOverlaps)",
+                "\(tag)-controls \(rects.count)",
+                "\(tag)-outside \(outside)",
+                "\(tag)-overlaps \(overlaps)",
+                "\(tag)-untipped \(rects.count - view.tipTexts.count)"] + anchors
       }
-      let drawingCamera = rects.dropLast().last.map { Int($0.minX) } ?? -1
 
+      var lines = snapshot("idle")
+      self.setDrawing(true)
+      lines += snapshot("drawing")
+      lines.append("tips " + view.tipTexts.joined(separator: ", "))
       if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
         view.cacheDisplay(in: view.bounds, to: rep)
         if let png = rep.representation(using: .png, properties: [:]) {
           try? png.write(to: URL(fileURLWithPath: self.session + "/palette.png"))
         }
       }
-      let lines = ["width \(Int(view.bounds.width))",
-                   "controls \(rects.count)",
-                   "controls-idle \(idleCount)",
-                   "outside \(outside)",
-                   "camera-idle \(idleCamera)",
-                   "camera-drawing \(drawingCamera)",
-                   "overlaps \(overlaps.count) \(overlaps.joined(separator: " "))"]
       self.setDrawing(false)
+      view.display()
+      if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let png = rep.representation(using: .png, properties: [:]) {
+          try? png.write(to: URL(fileURLWithPath: self.session + "/palette-idle.png"))
+        }
+      }
       try? (lines.joined(separator: "\n") + "\n")
         .write(toFile: self.session + "/layout.probe", atomically: true,
                encoding: .utf8)
