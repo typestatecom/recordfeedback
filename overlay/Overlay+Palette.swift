@@ -163,6 +163,24 @@ extension Overlay {
             weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
     }
 
+    // A spoken command produces no click and no keypress. Several of these do
+    // something the user cannot see from where they are looking, and a command
+    // that was misheard is one they need to catch at the moment it happens.
+    if let heard = voiceHeardTitle, Date().timeIntervalSince(voiceHeardAt) < 2.5 {
+      let text = "heard: " + heard
+      label(text, at: NSPoint(x: 14, y: bounds.maxY - 14), size: 10, weight: .semibold,
+            color: NSColor(srgbRed: 0.45, green: 0.85, blue: 1, alpha: 0.95))
+      view.name("voice-heard", NSRect(x: 14, y: bounds.maxY - 14, width: 100, height: 11))
+    } else if let failure = voiceFailure {
+      // Truncated to the first sentence. The whole of it is in the log and in
+      // the tooltip, and the row is not where a paragraph goes.
+      let first = failure.split(separator: ".").first.map(String.init) ?? failure
+      label("voice control off: " + first, at: NSPoint(x: 14, y: bounds.maxY - 14),
+            size: 9, weight: .regular,
+            color: NSColor(srgbRed: 1, green: 0.75, blue: 0.35, alpha: 0.95))
+      view.name("voice-failed", NSRect(x: 14, y: bounds.maxY - 14, width: 100, height: 11))
+    }
+
     if alarm {
       // Above the row rather than inside it, so the words appear without
       // shifting a single control out from under the user's cursor.

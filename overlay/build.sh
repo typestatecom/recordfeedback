@@ -29,7 +29,14 @@ if [ "${1:-}" = "--probes" ]; then
   flags=(-D RF_PROBES)
 fi
 
-swiftc -O -framework Cocoa -framework Carbon "${flags[@]+"${flags[@]}"}" \
+# The Info.plist is linked into the executable rather than put in a bundle,
+# because this is one file and not an application. macOS kills a process that
+# asks for Speech Recognition without one, so voice control cannot start at all
+# without this section being present.
+swiftc -O -framework Cocoa -framework Carbon -framework Speech -framework AVFoundation \
+  "${flags[@]+"${flags[@]}"}" \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist \
+  -Xlinker "$REPO/overlay/Info.plist" \
   -o "$out" "${sources[@]}"
 
 echo "built $out"

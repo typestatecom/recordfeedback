@@ -9,6 +9,14 @@ final class Settings {
 
   private(set) var shortcuts: [Action: Shortcut] = [:]
 
+  // Voice control is off until it is asked for. It needs a macOS permission of
+  // its own, and a tool that starts listening for orders because it was
+  // installed is not one a person can predict.
+  private(set) var voiceEnabled = false
+  private(set) var voiceTrigger = "let's"
+  private(set) var voiceEscape = "not a command"
+  private(set) var voicePhrases: [VoiceCommand: [String]] = [:]
+
   var path: String {
     let home = ProcessInfo.processInfo.environment["RF_HOME"]
       ?? NSHomeDirectory() + "/.recordfeedback"
@@ -39,12 +47,73 @@ final class Settings {
     save()
   }
 
+  func grammar() -> VoiceGrammar {
+    VoiceGrammar(trigger: voiceTrigger, escape: voiceEscape, phrases: phrasesOrDefaults())
+  }
+
+  func phrasesOrDefaults() -> [VoiceCommand: [String]] {
+    var out: [VoiceCommand: [String]] = [:]
+    for command in VoiceCommand.allCases {
+      let saved = voicePhrases[command]
+      out[command] = (saved?.isEmpty ?? true) ? command.defaultPhrases : saved!
+    }
+    return out
+  }
+
+  func setVoiceEnabled(_ on: Bool) {
+    voiceEnabled = on
+    save()
+  }
+
+  func setVoicePhrases(_ command: VoiceCommand, to list: [String]) {
+    let cleaned = list.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    voicePhrases[command] = cleaned
+    save()
+  }
+
+  func setVoiceWords(trigger: String, escape: String) {
+    let wantedTrigger = trigger.trimmingCharacters(in: .whitespaces)
+    let wantedEscape = escape.trimmingCharacters(in: .whitespaces)
+    // An empty trigger would make every phrase in the table a command, so the
+    // sentence "the rectangle is wrong" would change the tool. The old one
+    // stands rather than the session being handed a grammar that fires on
+    // ordinary speech.
+    if !wantedTrigger.isEmpty { voiceTrigger = wantedTrigger }
+    voiceEscape = wantedEscape
+    save()
+  }
+
+  func resetVoicePhrases() {
+    voicePhrases = [:]
+    save()
+  }
+
   func load() {
     shortcuts = [:]
     for action in Action.allCases { shortcuts[action] = action.fallback }
+    voiceEnabled = false
+    voiceTrigger = "let's"
+    voiceEscape = "not a command"
+    voicePhrases = [:]
     guard let data = FileManager.default.contents(atPath: path),
           let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
           let bound = root["shortcuts"] as? [String: Any] else { return }
+    if let voice = root["voice"] as? [String: Any] {
+      voiceEnabled = (voice["enabled"] as? Bool) ?? false
+      if let word = voice["trigger"] as? String,
+         !word.trimmingCharacters(in: .whitespaces).isEmpty {
+        voiceTrigger = word
+      }
+      if let word = voice["escape"] as? String { voiceEscape = word }
+      if let saved = voice["phrases"] as? [String: [String]] {
+        for command in VoiceCommand.allCases {
+          guard let list = saved[command.rawValue] else { continue }
+          let cleaned = list.map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+          if !cleaned.isEmpty { voicePhrases[command] = cleaned }
+        }
+      }
+    }
     for action in Action.allCases {
       guard let entry = bound[action.rawValue] as? [String: Any],
             let name = entry["key"] as? String,
@@ -75,7 +144,19 @@ final class Settings {
                                 "modifiers": modifiers,
                                 "shows": one.display]
     }
-    let root: [String: Any] = ["shortcuts": bound]
+    var phrases: [String: [String]] = [:]
+    let resolved = phrasesOrDefaults()
+    for command in VoiceCommand.allCases { phrases[command.rawValue] = resolved[command] }
+    // Written out in full, defaults included, because the file is where a
+    // person goes to see what they can say and a key that is not there is a
+    // sentence they never find out about.
+    let root: [String: Any] = [
+      "shortcuts": bound,
+      "voice": ["enabled": voiceEnabled,
+                "trigger": voiceTrigger,
+                "escape": voiceEscape,
+                "phrases": phrases],
+    ]
     guard let data = try? JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return }
     let folder = (path as NSString).deletingLastPathComponent

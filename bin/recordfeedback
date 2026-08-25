@@ -107,6 +107,33 @@ shot_dir() {
   fi
 }
 
+# The settings file is the overlay's, and the CLI only ever reads it, with one
+# exception: --voice has to be able to turn voice control on before the overlay
+# it configures has started.
+settings_file() { echo "$RF_HOME/settings.json"; }
+
+voice_enabled() {
+  local file
+  file="$(settings_file)"
+  [ -f "$file" ] || return 1
+  [ "$(jq -r '.voice.enabled // false' "$file" 2>/dev/null)" = "true" ]
+}
+
+set_voice_enabled() {
+  local wanted="$1" file
+  file="$(settings_file)"
+  mkdir -p "$RF_HOME"
+  local existing='{}'
+  [ -f "$file" ] && existing="$(cat "$file")"
+  # A settings file that cannot be parsed leaves every default in place rather
+  # than costing the user their stop key, so a broken one is replaced and not
+  # merged into.
+  echo "$existing" | jq --argjson on "$([ "$wanted" = 1 ] && echo true || echo false)" \
+    '.voice = ((.voice // {}) | .enabled = $on)' > "$file.new" 2>/dev/null \
+    || echo "{\"voice\":{\"enabled\":$([ "$wanted" = 1 ] && echo true || echo false)}}" > "$file.new"
+  mv "$file.new" "$file"
+}
+
 # The audio source. Tests replace the whole avfoundation input so the pipeline
 # runs without a microphone and without a person.
 ffmpeg_input() {
@@ -518,15 +545,22 @@ stop_overlay() {
 # ----------------------------------------------------------------------- start
 
 cmd_start() {
-  local note="" no_overlay=0
+  local note="" no_overlay=0 voice=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --note) note="${2:-}"; shift 2 ;;
       --device) RF_DEVICE="${2:-}"; shift 2 ;;
       --no-overlay) no_overlay=1; shift ;;
-      *) die "start: unknown option '$1'" "recordfeedback start [--note TEXT] [--device N] [--no-overlay]" ;;
+      --voice) voice=1; shift ;;
+      --no-voice) voice=0; shift ;;
+      *) die "start: unknown option '$1'" "recordfeedback start [--note TEXT] [--device N] [--no-overlay] [--voice|--no-voice]" ;;
     esac
   done
+
+  # The flag writes the setting rather than living only for this session, so
+  # that the settings window and the flag cannot disagree about whether the
+  # session that is running is listening.
+  [ -n "$voice" ] && set_voice_enabled "$voice"
 
   local live
   if live="$(live_session)"; then
@@ -631,6 +665,19 @@ cmd_start() {
     echo "  in draw mode: p pen, a arrow, r rectangle, h highlighter, t text"
     echo "  esc, Done, or the same tool again stops drawing. 1 to 6 colours, [ ] width"
     echo "  change any of these with the gear in the palette, or its menu bar item."
+    if voice_enabled; then
+      # The prompt is a macOS dialog that stops the recogniser dead until it is
+      # answered, and the user is about to start talking at a tool that is not
+      # listening yet. So it is said here, at the moment it happens, and not
+      # left in a README.
+      local trigger
+      trigger="$(jq -r '.voice.trigger // "let'"'"'s"' "$(settings_file)" 2>/dev/null)"
+      echo "  voice control is on. Say \"$trigger draw\", \"$trigger pick red\","
+      echo "  \"$trigger take a screenshot of this area\", \"$trigger clear\"."
+      echo "  say \"not a command\" first to say one of those and mean the words."
+      echo "  the first session asks for Speech Recognition. Answer the prompt or"
+      echo "  nothing is listening. The palette says so if it did not start."
+    fi
   else
     echo "  no overlay, so no annotations. shift-cmd-4 still takes screenshots."
   fi
@@ -976,6 +1023,66 @@ shots = load("shots.json", [])
 segments = [] if silent else [s for s in transcript.get("transcription", [])
                               if s.get("text", "").strip()]
 
+# The sentences the user spoke at this tool rather than about their work. They
+# were acted on while the session ran, and leaving them in the document asks
+# Claude Code to act on them a second time as though they were feedback.
+commands = load("commands.json", [])
+
+
+def words_of(text):
+    out = []
+    for character in text.lower():
+        out.append(character if (character.isalnum() or character == "'") else " ")
+    return "".join(out).split()
+
+
+def scrub(segments, commands):
+    """Take each spoken command out of the segment it was transcribed into.
+
+    Two recognisers heard the same seconds of audio and they do not agree word
+    for word, so the phrase is found by overlap rather than by equality. Both
+    read the same recording, so the offsets are the same clock and the search
+    is only ever a few seconds wide.
+    """
+    removed = []
+    for entry in commands:
+        wanted = words_of(entry.get("phrase", ""))
+        if not wanted:
+            continue
+        at = float(entry.get("at", 0)) * 1000
+        best = None
+        for segment in segments:
+            begins = segment.get("offsets", {}).get("from", 0)
+            ends = segment.get("offsets", {}).get("to", begins)
+            # A recogniser reports a command a moment after it was said, and
+            # whisper stamps the segment it started in, so the window reaches
+            # back further than it reaches forward.
+            if ends < at - 6000 or begins > at + 3000:
+                continue
+            said = words_of(segment["text"])
+            if not said:
+                continue
+            for index in range(len(said)):
+                for length in range(1, len(wanted) + 2):
+                    window = said[index:index + length]
+                    if not window:
+                        break
+                    hits = sum(1 for w in window if w in wanted)
+                    score = hits / max(len(window), len(wanted))
+                    if score >= 0.6 and (best is None or score > best[0]):
+                        best = (score, segment, index, index + len(window))
+        if best is None:
+            continue
+        _, segment, first, last = best
+        said = words_of(segment["text"])
+        kept = said[:first] + said[last:]
+        removed.append(entry)
+        segment["text"] = " " + " ".join(kept) if kept else ""
+    return [s for s in segments if s["text"].strip()], removed
+
+
+segments, scrubbed = scrub(segments, commands)
+
 start = mtime("start.ref")
 stop = mtime("stop.ref")
 seconds = (stop - start) if (start and stop and stop > start) else 0
@@ -1070,6 +1177,22 @@ else:
         for shot in placed.get(n, []):
             out.append(image(shot))
             out.append("")
+
+# Kept out of the transcript and reported on their own. They are instructions
+# the user gave this tool, which were carried out while the session ran, and a
+# reader who takes them for feedback acts on them a second time.
+if commands:
+    out.append("## Spoken commands")
+    out.append("")
+    out.append("These were said to the recorder and acted on while the session ran.")
+    out.append("They are not feedback and %s taken out of the transcript above."
+               % ("were" if scrubbed else "were not found in and so were not"))
+    out.append("")
+    for entry in commands:
+        out.append('%s %s, from "%s"'
+                   % (mmss(float(entry.get("at", 0))), entry.get("title", ""),
+                      entry.get("phrase", "")))
+    out.append("")
 
 out.append("## Screenshots")
 out.append("")

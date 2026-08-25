@@ -214,6 +214,32 @@ extension Overlay {
     }
   }
 
+  // The grammar, driven by sentences from a file. What the recogniser hears is
+  // Apple's business and needs a permission a test cannot grant, but what this
+  // tool does with a heard sentence is this tool's business and is decided
+  // here, so it is answered without a microphone or a person.
+  func probeGrammar() {
+    let source = ProcessInfo.processInfo.environment["RF_VOICE_HEARD"] ?? ""
+    let heard = (try? String(contentsOfFile: source, encoding: .utf8)) ?? ""
+    let grammar = Settings.shared.grammar()
+    var lines: [String] = []
+    for sentence in heard.split(separator: "\n").map(String.init) {
+      let trimmed = sentence.trimmingCharacters(in: .whitespaces)
+      guard !trimmed.isEmpty else { continue }
+      let matches = grammar.matches(in: trimmed)
+      if matches.isEmpty {
+        lines.append("heard|\(trimmed)|none|")
+      } else {
+        for one in matches {
+          lines.append("heard|\(trimmed)|\(one.command.rawValue)|\(one.phrase)")
+        }
+      }
+    }
+    try? (lines.joined(separator: "\n") + "\n")
+      .write(toFile: self.session + "/grammar.probe", atomically: true, encoding: .utf8)
+    NSApp.terminate(nil)
+  }
+
   // What the overlay makes of the recorder's level stream, rewritten on every
   // poll so a case can watch the alarm arm itself and then clear. Whether the
   // alarm reaches the row and the menu bar is not visible from the source, and

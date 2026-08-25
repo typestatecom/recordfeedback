@@ -40,6 +40,15 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // looks exactly like one that records speech from in front of the screen,
   // and that is the failure that costs a whole session.
   lazy var inputLevel = InputLevel(session: session)
+  var voice: VoiceListener?
+  // Why voice control is not listening, when it was asked for and did not
+  // start. Shown in the row, because a person who turned it on is about to talk
+  // to something that is not there.
+  var voiceFailure: String?
+  // The last command acted on, and when. A spoken command produces no click, so
+  // the row says what it heard for a moment afterwards.
+  var voiceHeardTitle: String?
+  var voiceHeardAt = Date.distantPast
   var settingsWindow: SettingsWindow?
   // Set the instant Stop is pressed, so the row and the menu bar can say the
   // click landed before anything downstream has had time to answer it.
@@ -69,6 +78,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
     buildWindows()
     buildPalette()
     installHotkeys()
+    startVoice()
 
     NotificationCenter.default.addObserver(
       self, selector: #selector(screensChanged),
@@ -122,6 +132,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     // visible from the source.
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "level" {
       probeLevel()
+    }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "grammar" {
+      probeGrammar()
     }
     // Opens the settings window, because a window written blind is a window
     // that crashes the first time somebody reaches for it.

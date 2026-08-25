@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.recordfeedback.overlay</string>
+  <key>CFBundleName</key>
+  <string>recordfeedback</string>
+  <!-- macOS kills a process that asks for either of these without saying what
+       for. This is the sentence the permission prompt shows, so it says what is
+       being asked for and what it is not. -->
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>recordfeedback listens for spoken commands such as "let's draw" while a feedback session is recording. Recognition runs on this Mac and no audio is sent anywhere.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>recordfeedback records what you say during a feedback session.</string>
+</dict>
+</plist>

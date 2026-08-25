@@ -1,0 +1,95 @@
+// What a spoken command reaches, and the record of it having been said.
+import Cocoa
+
+extension Overlay {
+  func startVoice() {
+    guard Settings.shared.voiceEnabled else { return }
+    let listener = VoiceListener(session: session, grammar: Settings.shared.grammar(),
+                                 startedAt: startedAt)
+    listener.delegate = self
+    voice = listener
+    listener.start()
+  }
+
+  // The commands are written down whether or not the transcript ends up being
+  // scrubbed of them, because a session where the tool did something the user
+  // did not ask for is one they need to be able to read back.
+  func logCommand(_ match: VoiceMatch, at offset: TimeInterval) {
+    var entry: [String: Any] = [
+      "at": max(0, (offset * 10).rounded() / 10),
+      "command": match.command.rawValue,
+      "title": match.command.title,
+      "phrase": match.phrase,
+      "heard": match.heard,
+    ]
+    if voiceFailure != nil { entry["note"] = "acted on while voice control was failing" }
+    var all = loadCommands()
+    all.append(entry)
+    guard let data = try? JSONSerialization.data(
+            withJSONObject: all, options: [.prettyPrinted]) else { return }
+    try? data.write(to: URL(fileURLWithPath: session + "/commands.json"), options: .atomic)
+  }
+
+  func loadCommands() -> [[String: Any]] {
+    guard let data = FileManager.default.contents(atPath: session + "/commands.json"),
+          let all = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
+    else { return [] }
+    return all
+  }
+
+  // A spoken command produces no click and no keypress, so without this the
+  // only sign it landed is the thing it did, and half of these do something the
+  // user cannot see from where they are looking.
+  func acknowledge(_ match: VoiceMatch) {
+    voiceHeardTitle = match.command.title
+    voiceHeardAt = Date()
+    paletteView?.needsDisplay = true
+    refreshStatusItem()
+  }
+
+  func perform(_ command: VoiceCommand) {
+    switch command {
+    case .draw: setDrawing(true)
+    case .done: leaveDrawing()
+    case .clear: clear()
+    case .undo: undo()
+    case .toolPen: select(.pen)
+    case .toolArrow: select(.arrow)
+    case .toolRect: select(.rect)
+    case .toolHighlighter: select(.highlighter)
+    case .toolText: select(.text)
+    case .colorRed: pick(0)
+    case .colorOrange: pick(1)
+    case .colorYellow: pick(2)
+    case .colorGreen: pick(3)
+    case .colorBlue: pick(4)
+    case .colorWhite: pick(5)
+    case .bigger: widen(+1)
+    case .smaller: widen(-1)
+    case .screenshot: capture(region: false)
+    case .region: capture(region: true)
+    case .hide: if !marksHidden { toggleHidden() }
+    case .show: if marksHidden { toggleHidden() }
+    case .stop: stopSession()
+    }
+  }
+}
+
+extension Overlay: VoiceListenerDelegate {
+  func voiceHeard(_ matches: [VoiceMatch], at offset: TimeInterval) {
+    for match in matches {
+      // Written down before it is acted on. Stop ends the process, and a
+      // command that ended the session without leaving a record of itself is
+      // the one entry a person would go looking for.
+      logCommand(match, at: offset)
+      acknowledge(match)
+      perform(match.command)
+    }
+  }
+
+  func voiceFailed(_ reason: String) {
+    voiceFailure = reason
+    warn("voice control is not listening: " + reason)
+    paletteView?.needsDisplay = true
+  }
+}
