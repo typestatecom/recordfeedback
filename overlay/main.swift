@@ -3,6 +3,7 @@
 // Overlay.swift.
 import Cocoa
 import Carbon.HIToolbox
+import Speech
 
 // Screen Recording is the permission that breaks this tool silently: without it
 // screencapture still writes a file and the file is only the wallpaper. doctor
@@ -21,6 +22,24 @@ if CommandLine.arguments.contains("--check-capture") {
 }
 if CommandLine.arguments.contains("--request-capture") {
   CGRequestScreenCaptureAccess()
+  exit(0)
+}
+// Asked without requesting, so doctor can report the permission without putting
+// a dialog on the screen of somebody who only wanted a status line.
+if CommandLine.arguments.contains("--check-speech") {
+  let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+  let state: String
+  switch SFSpeechRecognizer.authorizationStatus() {
+  case .authorized: state = "granted"
+  case .denied: state = "refused"
+  case .restricted: state = "restricted"
+  case .notDetermined: state = "not asked yet"
+  @unknown default: state = "unknown"
+  }
+  print("permission " + state)
+  print("available \(recognizer?.isAvailable == true ? 1 : 0)")
+  print("on-device \(recognizer?.supportsOnDeviceRecognition == true ? 1 : 0)")
+  print("enabled \(Settings.shared.voiceEnabled ? 1 : 0)")
   exit(0)
 }
 

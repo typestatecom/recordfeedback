@@ -364,8 +364,23 @@ cmd_doctor() {
     $input -t 0.5 -ac 1 -ar 16000 -c:a pcm_s16le "$out" >/dev/null 2>&1 || status=$?
   local bytes=0
   [ -f "$out" ] && bytes="$(stat -f %z "$out")"
-  if [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ]; then
-    check ok "microphone" "captured $bytes bytes from ${RF_FFMPEG_INPUT:-avfoundation input $RF_DEVICE}"
+  # Bytes are not sound. A denied microphone, a muted device and a virtual mixer
+  # routed to nothing all hand over a full sized file of zeros, and reporting
+  # that as a working microphone is the check that let a whole session be
+  # recorded into nothing.
+  local dbfs=""
+  [ "$bytes" -gt 44 ] && dbfs="$(audio_dbfs "$out" 2>/dev/null || true)"
+  local dead=0
+  if [ -n "$dbfs" ]; then
+    case "$dbfs" in
+      *inf*) dead=1 ;;
+      *) dead="$(python3 -c "print(1 if float('$dbfs') <= $DEAD_DBFS else 0)" 2>/dev/null || echo 0)" ;;
+    esac
+  fi
+  if [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ] && [ "$dead" = 1 ]; then
+    check fail "microphone" "it opened and every sample it captured was zero, at $dbfs dBFS. A live microphone in a quiet room reads about -70. A session recorded through this would look like it was working and transcribe to nothing. $SILENCE_HINT"
+  elif [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ]; then
+    check ok "microphone" "hearing ${dbfs:-?} dBFS from ${RF_FFMPEG_INPUT:-avfoundation input $RF_DEVICE}"
   elif [ "$status" -eq 124 ]; then
     check fail "microphone" "ffmpeg did not return within 20 seconds. A permission prompt may be waiting on screen. $MIC_HINT"
   else
@@ -381,6 +396,26 @@ cmd_doctor() {
       check ok "screen recording" "screenshots will contain your windows"
     else
       check fail "screen recording" "macOS is not letting this terminal record the screen, so every screenshot would be the wallpaper and nothing else. $SCREEN_HINT"
+    fi
+
+    # Only reported when it was asked for. Voice control is off by default, and
+    # a permission nobody needs is not a thing to report as missing.
+    local speech
+    speech="$("$OVERLAY_BIN" --check-speech 2>/dev/null || true)"
+    local speech_on speech_permission speech_ondevice
+    speech_on="$(printf '%s\n' "$speech" | sed -n 's/^enabled //p')"
+    speech_permission="$(printf '%s\n' "$speech" | sed -n 's/^permission //p')"
+    speech_ondevice="$(printf '%s\n' "$speech" | sed -n 's/^on-device //p')"
+    if [ "${speech_on:-0}" = 1 ]; then
+      if [ "$speech_permission" = granted ] && [ "${speech_ondevice:-0}" = 1 ]; then
+        check ok "voice control" "on, recognised on this Mac"
+      elif [ "$speech_permission" = refused ]; then
+        check fail "voice control" "on, but Speech Recognition was refused, so nothing is listening. Turn it on in System Settings, Privacy and Security, Speech Recognition."
+      elif [ "${speech_ondevice:-0}" != 1 ]; then
+        check fail "voice control" "on, but this machine has no offline recogniser for en-US, and recordfeedback will not send a recording of your session to a server. Download the offline dictation voice in System Settings, Keyboard, Dictation."
+      else
+        check warn "voice control" "on, and Speech Recognition is $speech_permission. macOS asks at the start of the first session that listens, and nothing listens until it is answered."
+      fi
     fi
   else
     check warn "overlay" "not built. Run $REPO_DIR/overlay/build.sh. Recording works without it, annotations do not."

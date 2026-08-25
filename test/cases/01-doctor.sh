@@ -30,3 +30,19 @@ case "$model_line" in
   ok*) ;;
   *) fail "doctor did not find the whisper model: $model_line" ;;
 esac
+
+# A microphone check that counts bytes passes on a dead device: a denied
+# permission, a muted input and a virtual mixer routed to nothing all hand over
+# a full sized file of zeros. Reporting that as working is the check that let a
+# whole session be recorded into nothing.
+out="$(RF_FFMPEG_INPUT="-f lavfi -i anullsrc=r=16000:cl=mono" "$RFB" doctor 2>&1 || true)"
+echo "$out"
+mic_line="$(printf '%s\n' "$out" | grep -i 'microphone' || true)"
+[ -n "$mic_line" ] || fail "doctor printed no microphone line at all. Got:
+$out"
+case "$mic_line" in
+  fail*) ;;
+  *) fail "doctor passed a microphone that captured nothing but zeros:
+$mic_line" ;;
+esac
+assert_contains "$mic_line" "zero" "the failing microphone line must say what is wrong"
