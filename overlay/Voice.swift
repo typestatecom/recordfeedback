@@ -233,6 +233,13 @@ final class VoiceListener {
 
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.requiresOnDeviceRecognition = true
+    // What this tool is listening for, so the recogniser weighs those words
+    // above the ones that sound like them. Measured against real recordings,
+    // "let's draw" comes back as "let's throw" without it.
+    request.contextualStrings = grammar.expectedPhrases()
+    // These are short instructions and not dictation, and the hint changes how
+    // the recogniser weighs a two word utterance against a sentence.
+    request.taskHint = .confirmation
     // Commands have to land while the user is still looking at the thing they
     // asked about, so the partial sentence is acted on rather than the final
     // one that arrives when they stop talking.

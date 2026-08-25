@@ -289,6 +289,20 @@ struct VoiceGrammar {
     return found
   }
 
+  // Every phrase with the trigger in front of it, which is what a recogniser can
+  // be told to expect. Without it "let's draw" comes back as "let's throw":
+  // these are short, out of context, and the words this tool cares about are
+  // ordinary words with common neighbours.
+  func expectedPhrases() -> [String] {
+    var out: [String] = []
+    for command in VoiceCommand.allCases {
+      for phrase in phrases[command] ?? [] {
+        out.append(trigger + " " + phrase)
+      }
+    }
+    return out
+  }
+
   // How many words of `words` from `at` are `needle`, or nothing. Both sides
   // have already had their articles taken out, so this compares what was meant.
   private func starts(_ words: [String], at: Int, with needle: String) -> Int? {
