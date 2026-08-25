@@ -617,7 +617,9 @@ cmd_start() {
     # RF_CLI is how the overlay finishes a session nobody is listening to. It
     # is this script, so the rescue flushes the recorder the same way a normal
     # stop does rather than reimplementing any of it in Swift.
-    RF_SESSION="$session" RF_CLI="$SELF" \
+    # The threshold travels with the launch so the number that refuses a session
+    # here and the number the palette raises its alarm on cannot drift apart.
+    RF_SESSION="$session" RF_CLI="$SELF" RF_DEAD_DBFS="$DEAD_DBFS" \
       nohup "$OVERLAY_BIN" >"$session/overlay.log" 2>&1 &
     echo "$!" > "$session/overlay.pid"
   fi

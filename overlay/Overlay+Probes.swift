@@ -146,12 +146,19 @@ extension Overlay {
             hintOverlaps += 1
           }
         }
+        // Asked of each control rather than by counting tips against controls.
+        // The row also carries readouts that name themselves without being
+        // clickable, and a subtraction counts one of those as a control that
+        // lost its tooltip.
+        let untipped = rects.filter { rect in
+          !view.tipRects.contains { $0.contains(NSPoint(x: rect.midX, y: rect.midY)) }
+        }.count
         return ["\(tag)-window \(Int(window.frame.width))",
                 "\(tag)-hint-overlaps \(hintOverlaps)",
                 "\(tag)-controls \(rects.count)",
                 "\(tag)-outside \(outside)",
                 "\(tag)-overlaps \(overlaps)",
-                "\(tag)-untipped \(rects.count - view.tipTexts.count)"] + anchors
+                "\(tag)-untipped \(untipped)"] + anchors
       }
 
       // The menu bar is the way out of an overlay whose window is unreachable,
@@ -204,6 +211,39 @@ extension Overlay {
       try? (lines.joined(separator: "\n") + "\n")
         .write(toFile: self.session + "/layout.probe", atomically: true,
                encoding: .utf8)
+    }
+  }
+
+  // What the overlay makes of the recorder's level stream, rewritten on every
+  // poll so a case can watch the alarm arm itself and then clear. Whether the
+  // alarm reaches the row and the menu bar is not visible from the source, and
+  // an alarm nobody can see is the failure it exists to prevent.
+  func probeLevel() {
+    Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+      guard let self = self, let view = self.paletteView else { return }
+      // Drawn and then read, so what is reported is what a person would be
+      // looking at and not what the flags say should have been drawn.
+      view.display()
+      let alarmed = view.namedRects["silence"] != nil
+      let title = self.statusItem?.button?.attributedTitle.string ?? ""
+      let lines = [
+        "input-reported \(self.inputLevel.reported ? 1 : 0)",
+        "input-dead \(self.inputLevel.isDead ? 1 : 0)",
+        "input-reading \(self.inputLevel.reading)",
+        "alarm \(alarmed ? 1 : 0)",
+        "alarm-text \(alarmed ? self.silenceAlarmText : "")",
+        "meter \(view.namedRects["meter"] != nil ? 1 : 0)",
+        "menu-alarm \(title.contains("NO SOUND") ? 1 : 0)",
+      ]
+      if let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+        view.cacheDisplay(in: view.bounds, to: rep)
+        if let png = rep.representation(using: .png, properties: [:]) {
+          try? png.write(to: URL(fileURLWithPath: self.session
+                                   + (alarmed ? "/palette-alarm.png" : "/palette-live.png")))
+        }
+      }
+      try? (lines.joined(separator: "\n") + "\n")
+        .write(toFile: self.session + "/level.probe", atomically: true, encoding: .utf8)
     }
   }
 

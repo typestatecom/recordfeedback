@@ -36,6 +36,10 @@ final class Overlay: NSObject, NSApplicationDelegate {
   var shutterFlash = false
   var keyMonitor: Any?
   var statusItem: NSStatusItem?
+  // Whether the recorder is hearing anything. A session that records silence
+  // looks exactly like one that records speech from in front of the screen,
+  // and that is the failure that costs a whole session.
+  lazy var inputLevel = InputLevel(session: session)
   var settingsWindow: SettingsWindow?
   // Set the instant Stop is pressed, so the row and the menu bar can say the
   // click landed before anything downstream has had time to answer it.
@@ -73,6 +77,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
     Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
       guard let self = self else { return }
       self.pulseOn.toggle()
+      self.inputLevel.poll()
       self.paletteView?.needsDisplay = true
       self.refreshStatusItem()
     }
@@ -111,6 +116,12 @@ final class Overlay: NSObject, NSApplicationDelegate {
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "layout" {
       probeLayout()
+    }
+    // Reports what the overlay makes of the recorder's level stream, because
+    // whether the alarm actually reaches the row and the menu bar is not
+    // visible from the source.
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "level" {
+      probeLevel()
     }
     // Opens the settings window, because a window written blind is a window
     // that crashes the first time somebody reaches for it.
@@ -201,8 +212,8 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // agree about it: the width itself, the room kept for it at the left edge of
   // the screen, and where the narrow row starts so that opening it lands in the
   // middle rather than off to one side.
-  let paletteDrawingWidth: CGFloat = 956
-  var paletteWidth: CGFloat { drawing ? paletteDrawingWidth : 446 }
+  let paletteDrawingWidth: CGFloat = 990
+  var paletteWidth: CGFloat { drawing ? paletteDrawingWidth : 480 }
 
   func buildPalette() {
     // The idle width. The tools, the colours and the width control belong to

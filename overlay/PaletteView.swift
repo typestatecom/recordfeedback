@@ -58,6 +58,11 @@ final class PaletteView: NSView, NSViewToolTipOwner {
   // control the row never names is a control only its author can find.
   var tipTexts: [String] { tips.map { $0.1 } }
 
+  // Where those labels sit, so a case can ask of one control whether it names
+  // itself instead of counting tips against controls and trusting the two lists
+  // to line up.
+  var tipRects: [NSRect] { tips.map { $0.0 } }
+
   // Where a named control ended up. The probe asks for controls by name
   // because what changes between the two layouts is how many sit between them.
   private(set) var namedRects: [String: NSRect] = [:]

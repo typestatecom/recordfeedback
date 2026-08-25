@@ -11,12 +11,24 @@ extension Overlay {
     view.clearNames()
     view.clearHints()
     let bounds = view.bounds
+    let alarm = inputLevel.alarming
     let shell = NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1),
                              xRadius: 13, yRadius: 13)
-    NSColor(srgbRed: 0.09, green: 0.09, blue: 0.11, alpha: 0.94).setFill()
+    // The alarm colours the whole row rather than lighting one small control,
+    // because the user is looking at their own work and not at this window.
+    if alarm {
+      NSColor(srgbRed: 0.30, green: 0.05, blue: 0.05, alpha: 0.97).setFill()
+    } else {
+      NSColor(srgbRed: 0.09, green: 0.09, blue: 0.11, alpha: 0.94).setFill()
+    }
     shell.fill()
-    NSColor(white: 1, alpha: 0.14).setStroke()
-    shell.lineWidth = 1
+    if alarm {
+      NSColor(srgbRed: 1, green: 0.35, blue: 0.30, alpha: 0.95).setStroke()
+      shell.lineWidth = 2
+    } else {
+      NSColor(white: 1, alpha: 0.14).setStroke()
+      shell.lineWidth = 1
+    }
     shell.stroke()
 
     // Every control sits on this line and names its key underneath it, so the
@@ -39,6 +51,11 @@ extension Overlay {
           at: NSPoint(x: x, y: mid - 8), size: 14, weight: .medium,
           color: NSColor(white: 1, alpha: 0.95))
     x += 48
+
+    // The clock proves the recorder is running. It does not prove it is hearing
+    // anything, and the difference between those two is a whole lost session.
+    drawInputMeter(in: NSRect(x: x, y: mid - 11, width: 26, height: 22), view: view)
+    x += 34
 
     separator(at: x, middle: mid); x += 13
 
@@ -146,7 +163,18 @@ extension Overlay {
             weight: .semibold, color: NSColor(white: 1, alpha: 0.95))
     }
 
-    if editing != nil {
+    if alarm {
+      // Above the row rather than inside it, so the words appear without
+      // shifting a single control out from under the user's cursor.
+      let text = silenceAlarmText
+      let font = NSFont.systemFont(ofSize: 11, weight: .bold)
+      let size = (text as NSString).size(withAttributes: [.font: font])
+      let at = NSPoint(x: min(bounds.midX - size.width / 2, bounds.maxX - size.width - 14),
+                       y: bounds.maxY - 15)
+      label(text, at: at, size: 11, weight: .bold,
+            color: NSColor(srgbRed: 1, green: 0.55, blue: 0.5, alpha: 1))
+      view.name("silence", NSRect(origin: at, size: size))
+    } else if editing != nil {
       label("typing", at: NSPoint(x: 14, y: bounds.maxY - 13), size: 9,
             weight: .regular,
             color: NSColor(srgbRed: 1, green: 0.9, blue: 0.3, alpha: 0.9))
@@ -392,5 +420,48 @@ extension Overlay {
       .font: NSFont.systemFont(ofSize: size, weight: weight),
       .foregroundColor: color,
     ])
+  }
+}
+
+extension Overlay {
+  // The meter is bars and not a number, because a person mid sentence reads a
+  // shape and not a measurement. It carries a scale even in silence, so an
+  // empty meter reads as an empty meter and never as a meter that is not there.
+  func drawInputMeter(in rect: NSRect, view: PaletteView) {
+    let bars = 5
+    let gap: CGFloat = 2
+    let barWidth = (rect.width - gap * CGFloat(bars - 1)) / CGFloat(bars)
+    let level = inputLevel.meter
+    let alarm = inputLevel.alarming
+    let lit = Int((level * Double(bars)).rounded(.up))
+
+    for index in 0..<bars {
+      // Rising, so the meter reads as a level and not as a row of lights.
+      let height = rect.height * (0.34 + 0.66 * CGFloat(index) / CGFloat(bars - 1))
+      let bar = NSRect(x: rect.minX + CGFloat(index) * (barWidth + gap),
+                       y: rect.minY, width: barWidth, height: height)
+      let shape = NSBezierPath(roundedRect: bar, xRadius: 1.5, yRadius: 1.5)
+      if alarm {
+        // Empty bars in the alarm colour, so the meter says the same thing the
+        // row does rather than sitting there dark and ambiguous.
+        NSColor(srgbRed: 1, green: 0.35, blue: 0.30, alpha: pulseOn ? 0.85 : 0.3).setFill()
+      } else if !inputLevel.reported {
+        NSColor(white: 1, alpha: 0.18).setFill()
+      } else if index < lit {
+        // The top of the scale is where clipping lives, so it is the one part
+        // of the meter that is not the same colour as the rest.
+        NSColor(srgbRed: index >= bars - 1 ? 1 : 0.36,
+                green: index >= bars - 1 ? 0.72 : 0.86,
+                blue: index >= bars - 1 ? 0.25 : 0.44, alpha: 0.95).setFill()
+      } else {
+        NSColor(white: 1, alpha: 0.16).setFill()
+      }
+      shape.fill()
+    }
+
+    view.name("meter", rect)
+    view.addTip(rect, alarm
+                  ? "the recorder is capturing silence, at " + inputLevel.reading
+                  : "microphone level, " + inputLevel.reading)
   }
 }

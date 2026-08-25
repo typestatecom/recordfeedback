@@ -59,11 +59,26 @@ extension Overlay {
     text.append(NSAttributedString(
       string: stopping ? "stopping" : clock,
       attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)]))
+    // The menu bar is the one place a full screen application cannot cover and
+    // a palette dragged out of reach cannot hide, so an alarm that does not
+    // reach it is one the user can be sitting in front of and never see.
+    if !stopping && inputLevel.alarming {
+      text.append(NSAttributedString(
+        string: "  NO SOUND",
+        attributes: [.foregroundColor: NSColor(srgbRed: 0.95, green: 0.26, blue: 0.21,
+                                               alpha: pulseOn ? 1.0 : 0.45),
+                     .font: NSFont.systemFont(ofSize: 11, weight: .bold)]))
+    }
     button.attributedTitle = text
-    button.toolTip = stopping
-      ? "recordfeedback is finishing the session"
-      : "recordfeedback is recording. \(shots) screenshot"
+    if stopping {
+      button.toolTip = "recordfeedback is finishing the session"
+    } else if inputLevel.alarming {
+      button.toolTip = "recordfeedback is recording silence, at "
+        + inputLevel.reading + ". Nothing said now is being kept."
+    } else {
+      button.toolTip = "recordfeedback is recording. \(shots) screenshot"
         + (shots == 1 ? "" : "s") + " so far."
+    }
   }
 
   func rebuildMenu() {
