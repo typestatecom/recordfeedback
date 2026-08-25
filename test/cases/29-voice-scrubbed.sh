@@ -78,11 +78,60 @@ assert_not_contains "$transcript_part" "screenshot of this area" "the transcript
 assert_contains "$transcript_part" "login button" "the transcript"
 assert_contains "$transcript_part" "spacing" "the transcript"
 
+# And it survived as it was written. Cutting one sentence out of a paragraph by
+# rebuilding the paragraph from its bare words costs every other sentence in it
+# its capitals and its punctuation, which is the document a person reads.
+kept="$(python3 -c "
+doc = open('$session/feedback.md').read()
+print(doc.split('## Spoken commands')[0])")"
+echo "$kept" | grep -q "The login button" \
+  || fail "the sentence before the command lost its capital letter:
+$kept"
+echo "$kept" | grep -q "too small\." \
+  || fail "the sentence before the command lost its full stop:
+$kept"
+
 # The command is still on the record, because a session where the tool did
 # something has to be readable back.
 assert_contains "$doc" "## Spoken commands" "the document"
 assert_contains "$doc" "screenshot a region" "the spoken commands section"
 assert_contains "$doc" "were taken out of the transcript" "the spoken commands section"
+
+# Whisper decides where its segments end, and whether the command got one of its
+# own is not this tool's choice. When it shares a segment with feedback, the
+# segment has to be cut and not rebuilt: rebuilding it from its bare words costs
+# every other sentence in it its capitals and its punctuation. Driven from a
+# written transcript, because the case cannot ask whisper to segment a certain
+# way and a defect that only appears on one of its choices is one that ships.
+shared="$RF_CASE_TMP/shared"
+mkdir -p "$shared"
+cp "$session/audio.wav" "$shared/audio.wav"
+touch "$shared/start.ref"
+sleep 1
+touch "$shared/stop.ref"
+cp "$session/meta.json" "$shared/meta.json"
+cat > "$shared/transcript.json" <<'JSON'
+{"transcription":[{"timestamps":{"from":"00:00:00,000","to":"00:00:12,000"},
+  "offsets":{"from":0,"to":12000},
+  "text":" The login button is far too small. Let's take a screenshot of this area. The spacing is wrong."}]}
+JSON
+cat > "$shared/commands.json" <<'JSON'
+[{"at":5.0,"command":"region","title":"screenshot a region",
+  "phrase":"let's take a screenshot of this area","heard":"x"}]
+JSON
+
+"$RFB" feedback "$shared" > /dev/null 2>&1 || fail "feedback failed on a shared segment"
+kept="$(python3 -c "
+doc = open('$shared/feedback.md').read()
+print(doc.split('## Spoken commands')[0])")"
+echo "--- shared segment ---"; echo "$kept"
+
+lower_kept="$(echo "$kept" | tr '[:upper:]' '[:lower:]')"
+assert_not_contains "$lower_kept" "screenshot of this area"   "the command was not cut out of the segment it shared with feedback"
+echo "$kept" | grep -q "The login button is far too small\."   || fail "the sentence before the command lost its capital or its full stop:
+$kept"
+echo "$kept" | grep -q "The spacing is wrong\."   || fail "the sentence after the command lost its capital or its full stop:
+$kept"
 
 # A session where nothing was said to the tool carries no such section, because
 # a heading explaining an empty list is noise in a document that is read fast.

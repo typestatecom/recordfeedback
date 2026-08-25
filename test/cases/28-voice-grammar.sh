@@ -36,6 +36,13 @@ let's see what happens when I click that
 not a command let's draw
 not a command, let's take a screenshot of this area
 let's draw and let's pick blue
+let's take screenshot of this area
+let's take a screenshot of area
+lets pick the arrow
+not command let's draw
+let's pick
+let's take a screenshot of
+let's take a screenshot and then I will explain
 SAID
 
 RF_SESSION="$session" RF_VOICE_HEARD="$heard" RF_OVERLAY_SELFTEST=grammar "$OVERLAY" \
@@ -108,3 +115,47 @@ expect "not a command, let's take a screenshot of this area" "none"
 # A person says two things in one breath and a recogniser hands over the whole
 # sentence at once.
 expect "let's draw and let's pick blue" "draw,colour-blue"
+
+# A recogniser drops articles. This machine's own recogniser heard "let's take
+# screenshot of this area" for a fixture that said "take a screenshot of this
+# area", and an exact match on the words let the command through untouched.
+# Articles carry nothing here, so they are not what a command turns on.
+expect "let's take screenshot of this area" "region"
+expect "let's take a screenshot of area" "region"
+expect "lets pick the arrow" "tool-arrow"
+
+# The escape has to survive the same treatment, or the one way to say these
+# sentences literally stops working the moment a recogniser drops a word.
+expect "not command let's draw" "none"
+
+# A recogniser builds its sentence a word at a time and hands over each version
+# of it, so a command that is the beginning of a longer one is only half heard
+# until the rest arrives. Acting on the short one takes the wrong picture, so
+# the match says whether it could still grow and the caller waits.
+grew() { awk -F'|' -v want="$1" '$2 == want { print $5 }' "$report" | tail -n 1; }
+assert_eq "$(grew "let's take a screenshot")" "grows" \
+  "\"let's take a screenshot\" is the whole of \"let's take a screenshot of this
+  area\" until the rest of it arrives, and it has to say so"
+assert_eq "$(grew "let's take a screenshot of this area")" "final" \
+  "the whole phrase cannot grow any further and waiting on it would lose it"
+
+# A command nothing extends is acted on the moment it is heard, or every one of
+# them waits for a recogniser to decide the sentence is over.
+assert_eq "$(grew "let's draw")" "final" \
+  "\"let's draw\" is nothing's beginning and must not be held back"
+
+# Half a word into a command is not a command. A recogniser hands over its
+# sentence as it builds it, and this is what most of those handovers look like.
+expect "let's pick" "none"
+
+# One word further in is still the longer phrase arriving and not the sentence
+# moving on. This is the handover that fired the wrong command: the short match
+# no longer sat at the end of the sentence, so it stopped being held back.
+assert_eq "$(grew "let's take a screenshot of")" "grows" \
+  "\"of\" is the next word of \"of this area\" and not the start of a new thought"
+
+# And once the words stop agreeing with the longer phrase, the user said the
+# short one and went on. Holding it back any longer loses it.
+expect "let's take a screenshot and then I will explain" "screenshot"
+assert_eq "$(grew "let's take a screenshot and then I will explain")" "final" \
+  "the sentence moved on, so the screenshot has to be taken"

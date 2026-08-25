@@ -45,6 +45,24 @@ out="$("$RFB" start --no-overlay 2>&1)"
 assert_eq "$(jq -r '.voice.trigger' "$settings")" "computer" \
   "starting a session overwrote the trigger word the user set"
 
+# The file --voice writes on a machine where the overlay has never saved one
+# carries a voice block and no shortcuts. The overlay has to honour it. It used
+# to drop the whole file on the floor when the shortcuts block was missing,
+# which meant --voice on a fresh install turned nothing on and said nothing.
+OVERLAY="$(probe_overlay)" \
+  || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
+cat > "$settings" <<'JSON'
+{"voice":{"enabled":true,"trigger":"computer","escape":"ignore this"}}
+JSON
+reads="$("$OVERLAY" --check-speech 2>/dev/null | sed -n 's/^enabled //p')"
+assert_eq "$reads" "1" \
+  "the overlay ignored a settings file that has voice settings and no shortcuts"
+
+# And the shortcuts still fall back to their defaults rather than to nothing,
+# because a file with no shortcuts block must not cost the user their stop key.
+assert_contains "$("$OVERLAY" --print-keys)" "stop opt-shift-S" \
+  "a settings file with no shortcuts block lost the default keys"
+
 # --no-voice turns it off again, and leaves the rest of the block alone.
 "$RFB" start --no-voice --no-overlay > /dev/null 2>&1
 "$RFB" abort > /dev/null

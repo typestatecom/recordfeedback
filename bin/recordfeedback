@@ -1111,10 +1111,29 @@ commands = [one for one in commands if isinstance(one, dict)]
 
 
 def words_of(text):
-    out = []
-    for character in text.lower():
-        out.append(character if (character.isalnum() or character == "'") else " ")
-    return "".join(out).split()
+    return [word for word, _, _ in tokens_of(text)]
+
+
+def tokens_of(text):
+    """The words of a piece of text, each remembering where it sat in it.
+
+    The offsets are what let one sentence be cut out of a paragraph without
+    rewriting the paragraph. Rebuilding it from its bare words costs every
+    other sentence in it its capitals and its punctuation, and that paragraph
+    is the document a person reads.
+    """
+    tokens = []
+    start = None
+    for index, character in enumerate(text):
+        if character.isalnum() or character == "'":
+            if start is None:
+                start = index
+        elif start is not None:
+            tokens.append((text[start:index].lower(), start, index))
+            start = None
+    if start is not None:
+        tokens.append((text[start:].lower(), start, len(text)))
+    return tokens
 
 
 def scrub(segments, commands):
@@ -1155,10 +1174,20 @@ def scrub(segments, commands):
         if best is None:
             continue
         _, segment, first, last = best
-        said = words_of(segment["text"])
-        kept = said[:first] + said[last:]
+        # Cut, not rebuilt. Only the characters the matched words occupied are
+        # taken out, so everything either side of them keeps the capitals and
+        # the punctuation whisper gave it.
+        tokens = tokens_of(segment["text"])
+        body = segment["text"]
+        cut_from = tokens[first][1]
+        cut_to = tokens[last - 1][2]
+        # The punctuation that trailed the removed sentence goes with it, or the
+        # paragraph is left with a stray full stop where the sentence used to be.
+        while cut_to < len(body) and body[cut_to] in ".,;:!?":
+            cut_to += 1
+        kept = (body[:cut_from].rstrip() + " " + body[cut_to:].lstrip()).strip()
         removed.append(entry)
-        segment["text"] = " " + " ".join(kept) if kept else ""
+        segment["text"] = " " + kept if kept else ""
     return [s for s in segments if s["text"].strip()], removed
 
 

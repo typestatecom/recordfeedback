@@ -346,7 +346,8 @@ extension Overlay {
         lines.append("heard|\(trimmed)|none|")
       } else {
         for one in matches {
-          lines.append("heard|\(trimmed)|\(one.command.rawValue)|\(one.phrase)")
+          lines.append("heard|\(trimmed)|\(one.command.rawValue)|\(one.phrase)"
+                       + "|\(one.couldGrow ? "grows" : "final")")
         }
       }
     }

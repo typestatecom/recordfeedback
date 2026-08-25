@@ -36,6 +36,16 @@ if CommandLine.arguments.contains("--check-speech") {
   case .notDetermined: state = "not asked yet"
   @unknown default: state = "unknown"
   }
+  // The locale actually chosen, and whether macOS really recognises in it.
+  // SFSpeechRecognizer hands back an object for a locale it does not support,
+  // reporting available and on device, which then recognises nothing at all, so
+  // membership of the supported list is the only answer worth printing.
+  let chosen = VoiceListener.locale()
+  let supported = SFSpeechRecognizer.supportedLocales()
+    .contains { $0.identifier.replacingOccurrences(of: "-", with: "_")
+                  == chosen.replacingOccurrences(of: "-", with: "_") }
+  print("locale " + chosen)
+  print("locale-supported \(supported ? 1 : 0)")
   print("permission " + state)
   print("available \(recognizer?.isAvailable == true ? 1 : 0)")
   print("on-device \(recognizer?.supportsOnDeviceRecognition == true ? 1 : 0)")

@@ -96,8 +96,12 @@ final class Settings {
     voiceEscape = "not a command"
     voicePhrases = [:]
     guard let data = FileManager.default.contents(atPath: path),
-          let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-          let bound = root["shortcuts"] as? [String: Any] else { return }
+          let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    else { return }
+    // Each block is read on its own. Requiring the shortcuts block before
+    // reading the voice one threw the whole file away when it was missing, and
+    // a file with a voice block and no shortcuts is exactly what --voice writes
+    // on a machine where this window has never saved anything.
     if let voice = root["voice"] as? [String: Any] {
       voiceEnabled = (voice["enabled"] as? Bool) ?? false
       if let word = voice["trigger"] as? String,
@@ -114,6 +118,7 @@ final class Settings {
         }
       }
     }
+    guard let bound = root["shortcuts"] as? [String: Any] else { return }
     for action in Action.allCases {
       guard let entry = bound[action.rawValue] as? [String: Any],
             let name = entry["key"] as? String,

@@ -42,6 +42,7 @@ final class VoiceListener {
   // A recogniser revises the sentence it is building, handing the whole thing
   // back on every partial result. Without a mark of what has already been acted
   // on, one "let's draw" fires on every revision that follows it.
+  private var fedAnything = false
   private var firedThrough = 0
   private var lastFired: [VoiceCommand: Date] = [:]
 
@@ -53,17 +54,49 @@ final class VoiceListener {
 
   private(set) var running = false
 
+  // The language to listen in, chosen only from the ones macOS actually
+  // recognises in.
+  //
+  // SFSpeechRecognizer hands back a recogniser for a locale it does not
+  // support, reporting itself available and capable of on device recognition,
+  // and then produces nothing at all, no result and no error. So the supported
+  // list is the only thing worth trusting. This is not a corner case: a machine
+  // set to English in a country Apple has no English recogniser for, en_DE for
+  // instance, hits it on the default path.
   static func locale() -> String {
+    let supported = SFSpeechRecognizer.supportedLocales()
+      .map { $0.identifier.replacingOccurrences(of: "-", with: "_") }
+    guard !supported.isEmpty else { return Locale.current.identifier }
+
     let wanted = ProcessInfo.processInfo.environment["RF_LANG"] ?? "auto"
-    if wanted.isEmpty || wanted == "auto" {
-      return Locale.current.identifier
+    let current = Locale.current.identifier.replacingOccurrences(of: "-", with: "_")
+    // RF_LANG is whisper's language code and carries no region. "auto" is
+    // whisper's too, and there is nothing to detect from before the first word,
+    // so the system's own language stands in for it.
+    let language = (wanted.isEmpty || wanted == "auto")
+      ? String(current.prefix(while: { $0 != "_" }))
+      : String(wanted.prefix(while: { $0 != "_" && $0 != "-" })).lowercased()
+    let region = Locale.current.region?.identifier ?? ""
+
+    // Most specific first. The region the machine is set to is the best answer
+    // when Apple recognises the language there, and a fixed fallback beats
+    // whichever entry the list happens to begin with.
+    let candidates = [
+      wanted.replacingOccurrences(of: "-", with: "_"),
+      current,
+      region.isEmpty ? "" : language + "_" + region,
+      language + "_" + language.uppercased(),
+      language + "_US",
+    ]
+    for candidate in candidates where !candidate.isEmpty {
+      if supported.contains(candidate) { return candidate }
     }
-    // RF_LANG is whisper's two letter code, and a recogniser wants a region
-    // with it. The system's own region is the best guess available.
-    if wanted.count == 2, let region = Locale.current.region?.identifier {
-      return wanted + "_" + region
+    if let any = supported.filter({ $0.hasPrefix(language + "_") }).sorted().first {
+      return any
     }
-    return wanted
+    // Nothing at all for this language. en_US rather than silence, and the
+    // caller says out loud which language it settled on.
+    return supported.contains("en_US") ? "en_US" : supported.sorted()[0]
   }
 
   init(session: String, grammar: VoiceGrammar, startedAt: Date) {
@@ -105,9 +138,15 @@ final class VoiceListener {
     // is whisper's, not a locale, and there is nothing to detect from before
     // the first word, so the system's own language is the honest default.
     let name = Self.locale()
+    // Checked against the supported list and not against the recogniser's own
+    // account of itself, which says available for locales it cannot recognise.
+    let supported = SFSpeechRecognizer.supportedLocales()
+      .contains { $0.identifier.replacingOccurrences(of: "-", with: "_") == name }
     let recognizer = SFSpeechRecognizer(locale: Locale(identifier: name))
-    guard let recognizer = recognizer, recognizer.isAvailable else {
-      delegate?.voiceFailed("no speech recogniser is available for " + name + ".")
+    guard supported, let recognizer = recognizer, recognizer.isAvailable else {
+      delegate?.voiceFailed("macOS does not recognise speech in " + name
+        + ". Set RF_LANG to a language it does, or change the language of this"
+        + " Mac. recordfeedback devices and doctor both report what it settled on.")
       return
     }
     guard recognizer.supportsOnDeviceRecognition else {
@@ -122,6 +161,9 @@ final class VoiceListener {
     self.recognizer = recognizer
     running = true
     restartTask()
+    // The log is what a person opens when voice control did nothing, so it says
+    // that it started, in which language, and later that audio reached it.
+    warn("voice control is listening in " + name + ".")
 
     // Twice a second, which is faster than segments arrive, so a finished one
     // is picked up in the same half second it was closed.
@@ -162,16 +204,21 @@ final class VoiceListener {
         return
       }
       guard let result = result else { return }
-      self.consider(result.bestTranscription.formattedString)
+      self.consider(result.bestTranscription.formattedString, settled: result.isFinal)
     }
   }
 
-  private func consider(_ heard: String) {
+  private func consider(_ heard: String, settled: Bool) {
     let matches = grammar.matches(in: heard)
     guard !matches.isEmpty else { return }
     var fresh: [VoiceMatch] = []
     let now = Date()
     for one in matches where one.wordIndex >= firedThrough {
+      // The sentence is still being built and this command is the beginning of
+      // a longer one. Acting now takes the wrong picture, and the rest of it
+      // arrives a moment later. Once the recogniser has settled there is
+      // nothing more coming and the short one is what was said.
+      if one.couldGrow && !settled { continue }
       // A revised partial can re-offer a command that was just acted on under a
       // different index. Two screenshots from one sentence is worse than a
       // missed repeat, and nobody says the same command twice in a second.
@@ -213,6 +260,10 @@ final class VoiceListener {
     where modified > consumedThrough && modified < newest {
       guard let data = manager.contents(atPath: path), !data.isEmpty else { continue }
       feed(data)
+      if !fedAnything {
+        fedAnything = true
+        warn("voice control is receiving audio from the recorder.")
+      }
       consumedThrough = modified
       // The recorder runs in real time, so when a segment was written is where
       // it sits in the recording. That is the same clock whisper timestamps

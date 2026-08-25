@@ -124,6 +124,11 @@ struct VoiceMatch {
   // as it goes, handing over the whole sentence again each time, so this is
   // what tells a command already acted on from a new one.
   var wordIndex: Int = 0
+  // True when this match sits at the end of what has been heard so far and a
+  // longer phrase begins with the same words. "take a screenshot" is the whole
+  // of "take a screenshot of this area" until the rest of it arrives, and
+  // acting on the short one takes the wrong picture.
+  var couldGrow: Bool = false
 }
 
 // The grammar. Given what the recogniser heard, it answers with the command the
@@ -189,7 +194,26 @@ struct VoiceGrammar {
         all.append((command, phrase, normalised))
       }
     }
-    return all.sorted { $0.2.split(separator: " ").count > $1.2.split(separator: " ").count }
+    // Ranked by the words that carry meaning, since those are the ones matched.
+    func weight(_ phrase: String) -> Int {
+      Self.meaningful(phrase.split(separator: " ").map(String.init)).count
+    }
+    return all.sorted { weight($0.2) > weight($1.2) }
+  }
+
+  // Words a recogniser drops without changing what was meant. This machine's own
+  // recogniser heard "let's take screenshot of this area" for audio that said
+  // "take a screenshot of this area", and an exact match on the words let the
+  // command through untouched. An article is never what a command turns on, so
+  // both sides are matched without them.
+  static let fillers: Set<String> = ["a", "an", "the"]
+
+  // The words that carry meaning, each remembering where it sat in the original
+  // sentence, so what is reported afterwards is still the words the user said.
+  private static func meaningful(_ words: [String]) -> [(word: String, at: Int)] {
+    words.enumerated().compactMap { offset, word in
+      fillers.contains(word) ? nil : (word, offset)
+    }
   }
 
   // The commands in one heard utterance, in the order they were said. A
@@ -202,7 +226,9 @@ struct VoiceGrammar {
     let candidates = ranked()
     var found: [VoiceMatch] = []
 
-    let words = text.split(separator: " ").map(String.init)
+    let original = text.split(separator: " ").map(String.init)
+    let carried = Self.meaningful(original)
+    let words = carried.map { $0.word }
     var index = 0
     while index < words.count {
       // The escape swallows the trigger that follows it, so the sentence is
@@ -230,9 +256,29 @@ struct VoiceGrammar {
       let after = index + triggerLength
       if let hit = candidates.first(where: { starts(words, at: after, with: $0.2) != nil }) {
         let length = starts(words, at: after, with: hit.2) ?? 0
-        let said = words[index..<(after + length)].joined(separator: " ")
+        let matched = Array(words[after..<(after + length)])
+        // What has been heard since this match. A recogniser builds its
+        // sentence a word at a time, so "of" on its own is not the sentence
+        // moving on, it is the longer phrase still arriving.
+        let tail = Array(words[(after + length)...])
+        let growable = candidates.contains { other in
+          let wanted = Self.meaningful(other.2.split(separator: " ").map(String.init))
+            .map { $0.word }
+          guard wanted.count > matched.count,
+                Array(wanted.prefix(matched.count)) == matched else { return false }
+          let rest = Array(wanted.dropFirst(matched.count))
+          // Still short of the longer phrase and still agreeing with it, so the
+          // rest of it may yet arrive. Once the words stop agreeing the user
+          // said the short one and went on to something else.
+          return tail.count < rest.count && Array(rest.prefix(tail.count)) == tail
+        }
+        // Reported from the sentence as it was said, articles and all, because
+        // the log is read by a person and the transcript is scrubbed against it.
+        let from = carried[index].at
+        let to = carried[after + length - 1].at
+        let said = original[from...to].joined(separator: " ")
         found.append(VoiceMatch(command: hit.0, phrase: said, heard: heard,
-                                wordIndex: index))
+                                wordIndex: index, couldGrow: growable))
         index = after + length
       } else {
         // A trigger with nothing behind it that this tool knows. It is the user
@@ -243,9 +289,11 @@ struct VoiceGrammar {
     return found
   }
 
-  // How many words of `words` from `at` are `needle`, or nothing.
+  // How many words of `words` from `at` are `needle`, or nothing. Both sides
+  // have already had their articles taken out, so this compares what was meant.
   private func starts(_ words: [String], at: Int, with needle: String) -> Int? {
-    let wanted = needle.split(separator: " ").map(String.init)
+    let wanted = Self.meaningful(needle.split(separator: " ").map(String.init))
+      .map { $0.word }
     guard !wanted.isEmpty, at + wanted.count <= words.count else { return nil }
     for (offset, word) in wanted.enumerated() where words[at + offset] != word {
       return nil

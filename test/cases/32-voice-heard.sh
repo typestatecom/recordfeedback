@@ -19,6 +19,11 @@ state="$(printf '%s\n' "$speech" | sed -n 's/^permission //p')"
 [ "$(printf '%s\n' "$speech" | sed -n 's/^on-device //p')" = 1 ] \
   || skip "this machine has no offline recogniser, and recordfeedback will not use the network one"
 
+# The transcript is half of what this case asserts, so it needs the real model.
+# RF_MODEL defaults inside RF_HOME, which is this case's own empty directory.
+export RF_MODEL="$HOME/.recordfeedback/models/ggml-large-v3-turbo-q5_0.bin"
+[ -f "$RF_MODEL" ] || skip "the whisper model is not on this machine"
+
 export RF_LANG=en
 export RF_VOICE_LISTEN=1
 export RF_OVERLAY_BIN="$OVERLAY"
@@ -64,9 +69,12 @@ while [ ! -f "$commands" ] && [ "$waited" -lt 100 ]; do
   sleep 0.2
   waited=$((waited + 1))
 done
-# One more pass, so a second command heard just after the first is in the file
-# before it is counted. Counting too early would pass a bug that fires twice.
-sleep 2
+# Long enough that a second command heard just after the first is in the file
+# before it is counted, and that the sentence after the command is in the
+# recording. Counting too early would pass a bug that fires twice, and stopping
+# too early would leave the transcript with nothing after the command to prove
+# survived.
+sleep 4
 
 "$RFB" stop > "$RF_CASE_TMP/stop.out" 2>&1 || true
 echo "--- overlay log ---"; cat "$session/overlay.log" 2>/dev/null
