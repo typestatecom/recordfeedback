@@ -689,6 +689,7 @@ cmd_start() {
     # The threshold travels with the launch so the number that refuses a session
     # here and the number the palette raises its alarm on cannot drift apart.
     RF_SESSION="$session" RF_CLI="$SELF" RF_DEAD_DBFS="$DEAD_DBFS" \
+      RF_LANG="$RF_LANG" \
       nohup "$OVERLAY_BIN" >"$session/overlay.log" 2>&1 &
     echo "$!" > "$session/overlay.pid"
   fi
@@ -1062,6 +1063,12 @@ segments = [] if silent else [s for s in transcript.get("transcription", [])
 # were acted on while the session ran, and leaving them in the document asks
 # Claude Code to act on them a second time as though they were feedback.
 commands = load("commands.json", [])
+# The parse is guarded above and the shape is guarded here. This document is
+# written even when the transcription failed, so it must not be the thing that
+# throws over a file somebody edited by hand.
+if not isinstance(commands, list):
+    commands = []
+commands = [one for one in commands if isinstance(one, dict)]
 
 
 def words_of(text):
@@ -1330,6 +1337,9 @@ cmd_stop() {
 
   cmd_feedback "$session"
   set_meta "$session" status done
+  # The level segments are scratch that only means anything while the recorder
+  # is running. The session keeps the audio, the shots and the document.
+  rm -rf "$session/$LEVEL_DIR"
   rm -f "$CURRENT"
 
   # The same verdict the document is built on. Whisper writes words out of

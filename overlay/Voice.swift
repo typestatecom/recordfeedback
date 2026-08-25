@@ -53,6 +53,19 @@ final class VoiceListener {
 
   private(set) var running = false
 
+  static func locale() -> String {
+    let wanted = ProcessInfo.processInfo.environment["RF_LANG"] ?? "auto"
+    if wanted.isEmpty || wanted == "auto" {
+      return Locale.current.identifier
+    }
+    // RF_LANG is whisper's two letter code, and a recogniser wants a region
+    // with it. The system's own region is the best guess available.
+    if wanted.count == 2, let region = Locale.current.regionCode {
+      return wanted + "_" + region
+    }
+    return wanted
+  }
+
   init(session: String, grammar: VoiceGrammar, startedAt: Date) {
     directory = session + "/levels"
     self.grammar = grammar
@@ -87,18 +100,23 @@ final class VoiceListener {
       return
     }
 
-    let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+    // The language whisper is told to transcribe in, so a person who set
+    // RF_LANG is not listened to in a language they are not speaking. "auto"
+    // is whisper's, not a locale, and there is nothing to detect from before
+    // the first word, so the system's own language is the honest default.
+    let name = Self.locale()
+    let recognizer = SFSpeechRecognizer(locale: Locale(identifier: name))
     guard let recognizer = recognizer, recognizer.isAvailable else {
-      delegate?.voiceFailed("no speech recogniser is available for en-US.")
+      delegate?.voiceFailed("no speech recogniser is available for " + name + ".")
       return
     }
     guard recognizer.supportsOnDeviceRecognition else {
       // The alternative is uploading the session, which is not a choice this
       // tool makes quietly on somebody's behalf.
-      delegate?.voiceFailed("this machine has no on device recogniser for en-US, and"
-        + " recordfeedback will not send a recording of your session to a server."
-        + " Download the offline dictation voice in System Settings, Keyboard,"
-        + " Dictation.")
+      delegate?.voiceFailed("this machine has no on device recogniser for " + name
+        + ", and recordfeedback will not send a recording of your session to a"
+        + " server. Download the offline dictation voice in System Settings,"
+        + " Keyboard, Dictation.")
       return
     }
     self.recognizer = recognizer
