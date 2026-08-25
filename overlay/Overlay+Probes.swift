@@ -214,6 +214,46 @@ extension Overlay {
     }
   }
 
+  // Starting and stopping listening from the key, which is what a person mid
+  // sentence actually reaches for. Whether the row carries the control in both
+  // states, and whether the switch and the file agree afterwards, is not
+  // visible from the source.
+  func probeVoiceToggle() {
+    guard let view = self.paletteView else { return }
+    var lines: [String] = []
+
+    func nameShown(_ key: String) -> Bool {
+      view.display()
+      return view.namedRects[key] != nil
+    }
+    func tip(for key: String) -> String {
+      view.display()
+      guard let rect = view.namedRects[key] else { return "" }
+      let point = NSPoint(x: rect.midX, y: rect.midY)
+      return view.tipText(at: point)
+    }
+
+    lines.append("enabled-start \(Settings.shared.voiceEnabled ? 1 : 0)")
+    lines.append("control-off \(nameShown("listen") ? 1 : 0)")
+    lines.append("label-off \(tip(for: "listen"))")
+
+    // Through the same call the key and the row button make.
+    self.toggleListening()
+    lines.append("enabled-after-on \(Settings.shared.voiceEnabled ? 1 : 0)")
+    lines.append("control-on \(nameShown("listen") ? 1 : 0)")
+
+    self.toggleListening()
+    lines.append("enabled-after-off \(Settings.shared.voiceEnabled ? 1 : 0)")
+    lines.append("listener-after-off \(self.voice == nil ? 0 : 1)")
+
+    // The file the next session reads, and the file the settings window shows.
+    let saved = (try? String(contentsOfFile: Settings.shared.path, encoding: .utf8)) ?? ""
+    lines.append("saved \(saved.contains("\"enabled\" : true") ? 1 : 0)")
+
+    try? (lines.joined(separator: "\n") + "\n")
+      .write(toFile: self.session + "/toggle.probe", atomically: true, encoding: .utf8)
+  }
+
   // A phrase added in the settings window has to be a phrase that works. The
   // list is edited in one place, saved in another and matched in a third, and a
   // phrase that reaches the file but not the grammar is a setting that lies.

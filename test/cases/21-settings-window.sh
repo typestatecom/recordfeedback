@@ -55,9 +55,9 @@ assert_contains "$(field tabs)" "Voice" \
   nobody is told about is a list nobody edits. The probe said:
 $contents"
 
-[ "$(field shortcut-buttons)" -eq 7 ] \
+[ "$(field shortcut-buttons)" -eq 8 ] \
   || fail "the settings window has $(field shortcut-buttons) shortcut buttons and
-  there are seven shortcuts. An action with no button is an action nobody can
+  there are eight shortcuts. An action with no button is an action nobody can
   rebind. The probe said:
 $contents"
 

@@ -22,6 +22,25 @@ extension Overlay {
     listener.start()
   }
 
+  // Started and stopped mid session, from a key and from the row, because the
+  // window that also holds this switch is three clicks away and the user's
+  // hands are off the keyboard. It writes the same setting the window shows: a
+  // second, session only notion of listening would leave that window reading on
+  // while nothing was listening.
+  func toggleListening() {
+    let wanted = !Settings.shared.voiceEnabled
+    Settings.shared.setVoiceEnabled(wanted)
+    voiceSettingChanged()
+    // Said out loud either way. Starting is invisible until a command lands,
+    // and stopping is invisible until one fails to.
+    voiceHeardTitle = wanted ? "listening" : "listening off"
+    voiceHeardAt = Date()
+    settingsWindow?.refreshFromSettings()
+    paletteView?.needsDisplay = true
+    rebuildMenu()
+    refreshStatusItem()
+  }
+
   // Turning voice control on or off, or changing what can be said, takes effect
   // in the session that is running. A setting that only applies to the next
   // session is one a user changes, tests, finds dead, and gives up on.

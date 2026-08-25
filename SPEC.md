@@ -367,6 +367,7 @@ no Accessibility permission, and a `CGEventTap` does. Use Carbon.
 | `undo` | `⌥⇧Z` | undo the last mark |
 | `stop` | `⌥⇧S` | stop the recording session |
 | `hide` | `⌥⇧H` | hide or show the marks without clearing them |
+| `listen` | `⌥⇧V` | start or stop listening for spoken commands |
 
 The left hand column is the name in the settings file and the name
 `--print-keys` reports. The middle one is only the default.
@@ -380,7 +381,8 @@ and the overlay's settings window records them by pressing them, because
 binding a key any other way needs a table of key codes in a README.
 
 The defaults are option and shift: `⌥⇧D` draw, `⌥⇧X` screenshot, `⌥⇧R`
-region, `⌥⇧Z` undo, `⌥⇧C` clear, `⌥⇧H` hide the marks, `⌥⇧S` stop.
+region, `⌥⇧Z` undo, `⌥⇧C` clear, `⌥⇧H` hide the marks, `⌥⇧V` listen,
+`⌥⇧S` stop.
 Command pairs are what other applications use, and `⌥⌘D` in particular is
 macOS's own show and hide the Dock, which Carbon will not hand over. The
 cost of option and shift is the characters it types on a layout that has
@@ -666,6 +668,18 @@ The settings window carries this on a tab of its own: the switch, the
 trigger word, the escape phrase, and every command's phrases one per
 line.
 
+Listening is started and stopped mid session by the `listen` key and by
+a microphone button in the anchored end of the palette, struck through
+when nothing is listening. A window three clicks away is not reachable
+by someone whose hands are off the keyboard, which is the whole point of
+this feature. It throws the same switch the settings window shows rather
+than a second session only one: two notions of listening would leave
+that window reading on while nothing listened. The button is drawn in
+both states, because a control that appears only when it is on is one
+nobody can find to turn on, and it is lit only when a listener is
+actually running, so a recogniser that failed to start does not show as
+listening.
+
 ## The slash command
 
 `commands/recordfeedback.md`, symlinked to
@@ -801,6 +815,14 @@ The cases that must exist:
     matches speech, is written to the settings file, replaces rather
     than joins the defaults, and does not flatten the shortcuts that
     live in the same file. An empty trigger word is refused.
+
+14. Listening starts and stops from the key mid session, the row carries
+    the control in both states and names which it is, and the state the
+    key left is the state the settings file holds.
+15. The whole voice path through the recogniser macOS ships, from spoken
+    audio to the command log, with the feedback either side of the
+    command reaching nothing. It skips until Speech Recognition is
+    granted, since it stands in for nothing and cannot ask.
 
 A case must never put a macOS permission dialog on the screen of whoever
 is running the suite. The probe build refuses to start the recogniser

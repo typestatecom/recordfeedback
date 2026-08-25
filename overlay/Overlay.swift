@@ -136,6 +136,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "grammar" {
       probeGrammar()
     }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "voice-toggle" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.probeVoiceToggle() }
+    }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "voice-settings" {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.probeVoiceSettings() }
     }
@@ -228,8 +231,8 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // agree about it: the width itself, the room kept for it at the left edge of
   // the screen, and where the narrow row starts so that opening it lands in the
   // middle rather than off to one side.
-  let paletteDrawingWidth: CGFloat = 990
-  var paletteWidth: CGFloat { drawing ? paletteDrawingWidth : 480 }
+  let paletteDrawingWidth: CGFloat = 1029
+  var paletteWidth: CGFloat { drawing ? paletteDrawingWidth : 519 }
 
   func buildPalette() {
     // The idle width. The tools, the colours and the width control belong to
@@ -348,6 +351,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
     case .undo: undo()
     case .clear: clear()
     case .hide: toggleHidden()
+    case .listen: toggleListening()
     case .stop: stopSession()
     }
   }

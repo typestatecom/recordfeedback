@@ -33,6 +33,12 @@ final class SettingsWindow: NSWindowController {
   private(set) var tabTitles: [String] = []
   private weak var tabView: NSTabView?
 
+  // The switch can also be thrown by the key and by the row, and a window left
+  // showing the old state is a window that disagrees with the thing it controls.
+  func refreshFromSettings() {
+    voiceSwitch?.state = Settings.shared.voiceEnabled ? .on : .off
+  }
+
   func showVoiceTab() {
     guard let tabs = tabView, tabs.tabViewItems.count > 1 else { return }
     tabs.selectTabViewItem(at: 1)

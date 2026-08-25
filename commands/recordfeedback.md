@@ -45,9 +45,11 @@ session.
 Voice control lets the user drive the overlay by saying "let's draw",
 "let's pick red", "let's take a screenshot of this area". Run
 `recordfeedback start --voice` for the next session, or for `voice off`,
-`--no-voice`. If they ask for it mid session, tell them the Voice tab in
-the settings window, reached by the gear in the palette, turns it on for
-the session that is already running.
+`--no-voice`. If they ask for it mid session, tell them the
+`listen` key, which `start` prints, and the microphone button in the
+palette beside the gear. Both start and stop listening in the session
+that is already running, and the Voice tab in the settings window holds
+the same switch.
 
 The first session that listens raises a macOS Speech Recognition prompt
 and nothing is listening until it is answered. Say that, since they are

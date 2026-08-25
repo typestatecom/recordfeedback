@@ -247,6 +247,24 @@ extension Overlay {
     view.name("settings", gear)
     right = gear.minX - 12
 
+    // In both rows and never moving, because whether anything is listening is a
+    // thing the user checks mid sentence. It is drawn in both states rather
+    // than only when listening: a control that appears only when it is on is
+    // one nobody can find to turn on.
+    let listening = voiceListening
+    let ear = NSRect(x: right - 32, y: mid - 15, width: 32, height: 30)
+    let listenKey = Settings.shared.shortcut(.listen)
+    control(ear, in: view, on: listening, key: listenKey.display,
+            tip: listening
+              ? "listening for spoken commands (" + listenKey.plain + ")"
+              : "not listening, spoken commands are off (" + listenKey.plain + ")") {
+      [weak self] in self?.toggleListening()
+    }
+    drawMicIcon(in: ear, listening: listening,
+                failed: voiceFailure != nil)
+    view.name("listen", ear)
+    right = ear.minX - 7
+
     let region = NSRect(x: right - 32, y: mid - 15, width: 32, height: 30)
     let regionKey = Settings.shared.shortcut(.region)
     control(region, in: view, on: false, key: regionKey.display,
@@ -481,5 +499,47 @@ extension Overlay {
     view.addTip(rect, alarm
                   ? "the recorder is capturing silence, at " + inputLevel.reading
                   : "microphone level, " + inputLevel.reading)
+  }
+}
+
+extension Overlay {
+  // Whether anything is actually listening, and not merely whether it was asked
+  // for. A microphone lit while the recogniser failed to start would be the
+  // same lie the clock told before it had a meter beside it.
+  var voiceListening: Bool {
+    Settings.shared.voiceEnabled && voice != nil && voiceFailure == nil
+  }
+
+  // A microphone, struck through when nothing is listening. The strike is what
+  // carries the state at a glance: a dimmed icon and a lit one are the same
+  // shape, and this row is read mid sentence.
+  func drawMicIcon(in rect: NSRect, listening: Bool, failed: Bool) {
+    let colour: NSColor = failed
+      ? NSColor(srgbRed: 1, green: 0.75, blue: 0.35, alpha: 0.95)
+      : NSColor(white: 1, alpha: listening ? 1.0 : 0.5)
+    colour.setFill()
+    colour.setStroke()
+
+    let body = NSRect(x: rect.midX - 3.5, y: rect.midY - 2, width: 7, height: 11)
+    NSBezierPath(roundedRect: body, xRadius: 3.5, yRadius: 3.5).fill()
+
+    let cradle = NSBezierPath()
+    cradle.appendArc(withCenter: NSPoint(x: rect.midX, y: rect.midY + 1),
+                     radius: 6.5, startAngle: 200, endAngle: 340, clockwise: true)
+    cradle.lineWidth = 1.5
+    cradle.stroke()
+
+    let stem = NSBezierPath()
+    stem.move(to: NSPoint(x: rect.midX, y: rect.midY - 5.5))
+    stem.line(to: NSPoint(x: rect.midX, y: rect.midY - 9))
+    stem.lineWidth = 1.5
+    stem.stroke()
+
+    guard !listening else { return }
+    let slash = NSBezierPath()
+    slash.move(to: NSPoint(x: rect.midX - 8, y: rect.midY - 9))
+    slash.line(to: NSPoint(x: rect.midX + 8, y: rect.midY + 9))
+    slash.lineWidth = 1.8
+    slash.stroke()
   }
 }

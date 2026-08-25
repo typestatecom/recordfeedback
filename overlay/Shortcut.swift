@@ -8,7 +8,7 @@ import Carbon.HIToolbox
 // What a hotkey does. The name is what the settings file calls it and what the
 // CLI prints, so it is written once here and never spelled out again.
 enum Action: String, CaseIterable {
-  case draw, screenshot, region, undo, clear, hide, stop
+  case draw, screenshot, region, undo, clear, hide, listen, stop
 
   var title: String {
     switch self {
@@ -18,6 +18,7 @@ enum Action: String, CaseIterable {
     case .undo: return "Undo the last mark"
     case .clear: return "Clear the marks"
     case .hide: return "Hide the marks"
+    case .listen: return "Listen for spoken commands"
     case .stop: return "Stop the session"
     }
   }
@@ -34,6 +35,7 @@ enum Action: String, CaseIterable {
     case .undo: return Shortcut(keyCode: kVK_ANSI_Z)
     case .clear: return Shortcut(keyCode: kVK_ANSI_C)
     case .hide: return Shortcut(keyCode: kVK_ANSI_H)
+    case .listen: return Shortcut(keyCode: kVK_ANSI_V)
     case .stop: return Shortcut(keyCode: kVK_ANSI_S)
     }
   }

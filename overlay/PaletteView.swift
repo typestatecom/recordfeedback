@@ -63,6 +63,13 @@ final class PaletteView: NSView, NSViewToolTipOwner {
   // to line up.
   var tipRects: [NSRect] { tips.map { $0.0 } }
 
+  // The label a control would show under the pointer, asked for by where the
+  // control is rather than by what order it was drawn in.
+  func tipText(at point: NSPoint) -> String {
+    for (rect, text) in tips where rect.contains(point) { return text }
+    return ""
+  }
+
   // Where a named control ended up. The probe asks for controls by name
   // because what changes between the two layouts is how many sit between them.
   private(set) var namedRects: [String: NSRect] = [:]

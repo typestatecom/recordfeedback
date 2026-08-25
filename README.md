@@ -113,6 +113,7 @@ the ones actually bound, since you can rebind all of them:
 | `opt-shift-Z` | undo |
 | `opt-shift-C` | clear |
 | `opt-shift-H` | hide the marks |
+| `opt-shift-V` | start or stop listening for spoken commands |
 
 In draw mode: `p` pen, `a` arrow, `r` rectangle, `h` highlighter, `t`
 text. `1` to `6` pick a colour, `[` and `]` change the width, `esc` or
@@ -184,6 +185,14 @@ so if `let's` collides with how you talk, change it.
 The phrases are yours to edit. The Voice tab lists every command with
 its phrases, one per line, and any line reaches the command, so add the
 way you would actually say it.
+
+You can start and stop listening in the middle of a session without
+opening anything: `opt-shift-V`, or the microphone button in the palette
+next to the gear. It is struck through when nothing is listening, so the
+row always says which it is. Useful when you are about to read something
+aloud, or explain this tool to someone. It is the same switch the Voice
+tab shows, so turning it off leaves it off for the next session too, and
+the same key turns it back on.
 
 Spoken commands do not appear in the transcript. They were carried out
 while you were talking, and leaving them in would ask Claude Code to

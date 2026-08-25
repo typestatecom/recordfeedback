@@ -563,7 +563,7 @@ print_hotkeys() {
     echo "  the overlay would not report its keys, so use its buttons instead."
     return 0
   fi
-  local draw shot region stop undo clear hide
+  local draw shot region stop undo clear hide listen
   draw="$(printf '%s\n' "$keys" | sed -n 's/^draw //p')"
   shot="$(printf '%s\n' "$keys" | sed -n 's/^screenshot //p')"
   region="$(printf '%s\n' "$keys" | sed -n 's/^region //p')"
@@ -571,8 +571,16 @@ print_hotkeys() {
   undo="$(printf '%s\n' "$keys" | sed -n 's/^undo //p')"
   clear="$(printf '%s\n' "$keys" | sed -n 's/^clear //p')"
   hide="$(printf '%s\n' "$keys" | sed -n 's/^hide //p')"
+  listen="$(printf '%s\n' "$keys" | sed -n 's/^listen //p')"
   echo "  $draw draw, $shot screenshot, $region region, $stop stop"
   echo "  $undo undo, $clear clear, $hide hide the marks"
+  # Printed whether or not it is on, because the key is what turns it on and a
+  # key nobody is told about is a feature nobody finds.
+  if voice_enabled; then
+    echo "  $listen stop listening for spoken commands"
+  else
+    echo "  $listen start listening for spoken commands"
+  fi
 }
 
 # The overlay cannot talk to the user: it writes to a log nobody opens. What it
