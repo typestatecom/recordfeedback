@@ -167,9 +167,12 @@ seconds, in dBFS, and the loudest rather than the latest because a
 person draws breath mid sentence. A segment older than eight seconds is
 ignored, since under `segment_wrap` files are overwritten in place and a
 recorder that died leaves loud ones behind. `DEAD_DBFS` is -85: a live
-microphone in a quiet room measured between -70 and -77 dBFS on this
-machine and a stream of zeros reads `-inf`, so the two are told apart
-with a wide margin and the number needs no tuning.
+microphone in a quiet room measured between -74 and -81 dBFS on this
+machine over repeated samples, and a stream of zeros reads `-inf` here
+and -91 through ffmpeg's volumedetect, which clamps. The threshold sits
+between the two with a handful of dB either side, and the level is taken
+as the loudest of several seconds rather than the latest, so a pause
+between two sentences cannot reach it.
 
 `status` reports the level of a live session. `doctor` reports the level
 of half a second of real capture and fails on a device delivering

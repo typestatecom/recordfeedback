@@ -60,7 +60,7 @@ final class VoiceListener {
     }
     // RF_LANG is whisper's two letter code, and a recogniser wants a region
     // with it. The system's own region is the best guess available.
-    if wanted.count == 2, let region = Locale.current.regionCode {
+    if wanted.count == 2, let region = Locale.current.region?.identifier {
       return wanted + "_" + region
     }
     return wanted

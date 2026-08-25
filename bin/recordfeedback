@@ -54,10 +54,12 @@ MIC_HINT='the terminal application needs Microphone permission in System Setting
 SILENCE_HINT='check that the right input is selected and that its volume is not at zero, in System Settings, Sound, Input. An avfoundation index is not stable across reboots or plugged in devices, so a virtual mixer that is routed to nothing can take the index the microphone had. Run recordfeedback devices to see the list and start --device N to pick one.'
 
 # A live microphone in a silent room still carries a noise floor, measured on
-# this machine between -70 and -77 dBFS. A stream of zeros reads as -inf. The
-# gap between them is wide enough that this threshold needs no tuning, and
-# anything below it is lost audio whether the cause is a denied permission, a
-# muted device or an input volume left at zero.
+# this machine between -74 and -81 dBFS over repeated samples. A stream of zeros
+# reads -inf here and -91 through ffmpeg's volumedetect, which clamps. So this
+# sits between the two with a handful of dB either side, and the level is taken
+# as the loudest of several seconds rather than the latest, so a pause between
+# two sentences cannot reach it. Anything at or below is lost audio, whether the
+# cause is a denied permission, a muted device or an input volume left at zero.
 DEAD_DBFS=-85
 
 # ------------------------------------------------------------------- plumbing
@@ -378,10 +380,13 @@ cmd_doctor() {
   rm -f "$out"
   local input status=0
   input="$(ffmpeg_input)"
-  # Half a second of real capture is the only honest test of the permission.
+  # Real capture is the only honest test of the permission. A second of it and
+  # not half a one, because the level and not the byte count is what is judged
+  # now, and a short window lands on a quiet moment between two breaths often
+  # enough to read several dB below the room it was taken in.
   # shellcheck disable=SC2086
   run_with_timeout 20 ffmpeg -nostdin -hide_banner -loglevel error -y \
-    $input -t 0.5 -ac 1 -ar 16000 -c:a pcm_s16le "$out" >/dev/null 2>&1 || status=$?
+    $input -t 1 -ac 1 -ar 16000 -c:a pcm_s16le "$out" >/dev/null 2>&1 || status=$?
   local bytes=0
   [ -f "$out" ] && bytes="$(stat -f %z "$out")"
   # Bytes are not sound. A denied microphone, a muted device and a virtual mixer
@@ -398,7 +403,7 @@ cmd_doctor() {
     esac
   fi
   if [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ] && [ "$dead" = 1 ]; then
-    check fail "microphone" "it opened and every sample it captured was zero, at $dbfs dBFS. A live microphone in a quiet room reads about -70. A session recorded through this would look like it was working and transcribe to nothing. $SILENCE_HINT"
+    check fail "microphone" "it opened and every sample it captured was zero, at $dbfs dBFS. A live microphone in a quiet room reads about -75. A session recorded through this would look like it was working and transcribe to nothing. $SILENCE_HINT"
   elif [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ]; then
     check ok "microphone" "hearing ${dbfs:-?} dBFS from ${RF_FFMPEG_INPUT:-avfoundation input $RF_DEVICE}"
   elif [ "$status" -eq 124 ]; then
@@ -691,7 +696,7 @@ cmd_start() {
     kill -KILL "$pid" 2>/dev/null || true
     echo "recordfeedback: the recorder is running but the input is silence." >&2
     echo "  every sample it captured was zero, measured at $dbfs dBFS. A live" >&2
-    echo "  microphone in a quiet room reads about -70. Recording this would" >&2
+    echo "  microphone in a quiet room reads about -75. Recording this would" >&2
     echo "  have looked exactly like a working session and transcribed to" >&2
     echo "  nothing." >&2
     echo "  command: ffmpeg $input -ac 1 -ar 16000 -c:a pcm_s16le $session/audio.wav" >&2

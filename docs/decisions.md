@@ -589,8 +589,13 @@ the stream that will actually be transcribed rather than from a second
 capture that can be healthy while the recording is dead.
 
 The threshold is -85 dBFS. A live microphone in a quiet room measured
-between -70 and -77 dBFS on this machine and a stream of zeros reads
--inf, so the gap is wide enough that the number needs no tuning.
+between -74 and -81 dBFS on this machine over repeated samples. A stream
+of zeros reads -inf from the raw samples and -91 through ffmpeg's
+volumedetect, which clamps there. So -85 sits between the two with a
+handful of dB either side rather than a wide gap, and what keeps that
+honest is taking the loudest of several seconds rather than the latest:
+a pause between two sentences never reaches it. If the floor of some
+other machine is lower, this is the number to move.
 
 ## 2026-08-25 start refuses a dead input, and a live session only warns
 
