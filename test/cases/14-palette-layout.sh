@@ -36,9 +36,6 @@ $(cat "$RF_CASE_TMP/overlay.log")"
 $(cat "$RF_CASE_TMP/overlay.log")"
 done
 
-kill -TERM "$overlay_pid" 2>/dev/null || true
-trap - EXIT
-
 contents="$(cat "$report")"
 field() { printf '%s\n' "$contents" | sed -n "s/^$1 //p"; }
 
@@ -113,10 +110,23 @@ $contents"
 # invisible, which is worse than one that was refused. Whichever happened, the
 # tool has to say so rather than leave the user looking for it.
 if [ "$(field status-behind-notch)" = "1" ]; then
+  # The overlay measures its own item half a second after its windows are up,
+  # which is after this probe has already reported, so the warning is waited for
+  # rather than assumed to have been written. The CLI waits for the same reason
+  # and says so where it does it.
+  waited=0
+  while [ "$waited" -lt 40 ]; do
+    grep -q "behind this display's notch" "$RF_CASE_TMP/overlay.log" 2>/dev/null && break
+    sleep 0.1
+    waited=$((waited + 1))
+  done
   assert_contains "$(cat "$RF_CASE_TMP/overlay.log")" "behind this display's notch" \
     "the overlay says so when its indicator lands behind the notch. The menu
   bar on this machine is full: $(field notch) is the hole and the item is at
   $(field status-x)"
 fi
+
+kill -TERM "$overlay_pid" 2>/dev/null || true
+trap - EXIT
 
 echo "both rows fit, and the controls they share do not move between them"

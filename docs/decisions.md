@@ -698,3 +698,25 @@ not this tool's, and the defect only appeared when it shared one. So the
 case that covers it is driven from a written transcript rather than from
 audio: a defect that shows on only one of whisper's choices is one that
 ships.
+
+## 2026-08-25 The recorder resolves its input by name and not by index
+
+The session this tool was fixed for was recorded through a virtual mixer
+routed to nothing, and the cause was confirmed by watching it happen
+again: a pair of AirPods connecting moved the built in microphone from
+avfoundation index 0 to index 1 and put `CASTER Stream Mix 1` in its
+place. `start` defaulted to index 0, so it opened the mixer and recorded
+a file of zeros.
+
+The spec had already said the indexes are per machine and nothing may
+assume them, and `start` assumed one anyway. It now matches the name of
+the system default input against the avfoundation list, and falls back
+to index 0 only when there is nothing to match. An index the user gives
+is theirs and is used as given, since the point of `--device` is to
+overrule this.
+
+The cost is a `system_profiler` call at the start of a session, about a
+second, and a resolution that silently falls back when Apple renames a
+device between the two lists. The check that the input carries sound is
+what catches it when the fallback is wrong, so the two together fail
+loudly rather than quietly.

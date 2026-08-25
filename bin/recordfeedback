@@ -6,7 +6,10 @@ set -euo pipefail
 RF_HOME="${RF_HOME:-$HOME/.recordfeedback}"
 RF_MODEL="${RF_MODEL:-$RF_HOME/models/ggml-large-v3-turbo-q5_0.bin}"
 RF_LANG="${RF_LANG:-auto}"
-RF_DEVICE="${RF_DEVICE:-0}"
+# Empty means nobody chose one, which is not the same as choosing index 0. An
+# avfoundation index is not a device: it shifts when something is plugged in,
+# and the tool resolves the default by name instead of assuming a number.
+RF_DEVICE="${RF_DEVICE:-}"
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 # Follow the install symlink so the overlay binary is found next to the real
@@ -156,13 +159,70 @@ set_voice_enabled() {
   mv "$file.new" "$file"
 }
 
+# The avfoundation audio inputs, one "index name" per line.
+audio_inputs() {
+  ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 \
+    | sed -n '/AVFoundation audio devices/,$p' \
+    | sed 's/^\[AVFoundation indev @ [^]]*\] //' \
+    | sed -n 's/^\[\([0-9][0-9]*\)\] \(.*\)$/\1 \2/p'
+}
+
+# The input macOS is set to use, by name. An index is not a device.
+system_default_input() {
+  command -v system_profiler > /dev/null 2>&1 || return 1
+  system_profiler SPAudioDataType 2>/dev/null \
+    | awk '/^        [A-Za-z].*:$/{ name = $0 } /Default Input Device: Yes/{ print name; exit }' \
+    | sed 's/^ *//; s/:$//'
+}
+
+# Which input to record from. An index the user gave is theirs and is used as
+# it is. Otherwise the one macOS itself is set to, found by name, because the
+# indexes move: a pair of headphones connecting can put a virtual mixer routed
+# to nothing where the microphone used to be, and a session recorded through
+# that is a file of zeros that looks exactly like a working one.
+resolve_device() {
+  if [ -n "$RF_DEVICE" ]; then
+    printf '%s' "$RF_DEVICE"
+    return 0
+  fi
+  local wanted inputs index name
+  wanted="$(system_default_input || true)"
+  if [ -n "$wanted" ]; then
+    inputs="$(audio_inputs || true)"
+    while IFS=' ' read -r index name; do
+      [ -n "$index" ] || continue
+      if [ "$name" = "$wanted" ]; then
+        printf '%s' "$index"
+        return 0
+      fi
+    done <<< "$inputs"
+  fi
+  # Nothing to match against. Index 0 is the historical default and the input
+  # check at start is what catches it when it is the wrong one.
+  printf '%s' "0"
+}
+
+# The input in words, for the lines a person reads. An index on its own says
+# nothing about which device it turned out to be, and which device it turned out
+# to be is the whole question when a recording comes back empty.
+device_label() {
+  local index name
+  index="$(resolve_device)"
+  name="$(audio_inputs 2>/dev/null | sed -n "s/^$index //p" | head -1)"
+  if [ -n "$name" ]; then
+    printf '%s' "$name (avfoundation index $index)"
+  else
+    printf 'avfoundation index %s' "$index"
+  fi
+}
+
 # The audio source. Tests replace the whole avfoundation input so the pipeline
 # runs without a microphone and without a person.
 ffmpeg_input() {
   if [ -n "${RF_FFMPEG_INPUT:-}" ]; then
     printf '%s' "$RF_FFMPEG_INPUT"
   else
-    printf '%s' "-f avfoundation -i :$RF_DEVICE"
+    printf '%s' "-f avfoundation -i :$(resolve_device)"
   fi
 }
 
@@ -405,7 +465,7 @@ cmd_doctor() {
   if [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ] && [ "$dead" = 1 ]; then
     check fail "microphone" "it opened and every sample it captured was zero, at $dbfs dBFS. A live microphone in a quiet room reads about -75. A session recorded through this would look like it was working and transcribe to nothing. $SILENCE_HINT"
   elif [ "$status" -eq 0 ] && [ "$bytes" -gt 44 ]; then
-    check ok "microphone" "hearing ${dbfs:-?} dBFS from ${RF_FFMPEG_INPUT:-avfoundation input $RF_DEVICE}"
+    check ok "microphone" "hearing ${dbfs:-?} dBFS from ${RF_FFMPEG_INPUT:-$(device_label)}"
   elif [ "$status" -eq 124 ]; then
     check fail "microphone" "ffmpeg did not return within 20 seconds. A permission prompt may be waiting on screen. $MIC_HINT"
   else
@@ -646,7 +706,7 @@ cmd_start() {
   local session
   session="$(new_session_dir)"
   touch "$session/start.ref"
-  write_meta "$session" "$note" "${RF_FFMPEG_INPUT:+synthetic}${RF_FFMPEG_INPUT:-$RF_DEVICE}" "recording"
+  write_meta "$session" "$note" "${RF_FFMPEG_INPUT:+synthetic}${RF_FFMPEG_INPUT:-$(resolve_device)}" "recording"
 
   local ctl="$session/ffmpeg.ctl"
   mkfifo "$ctl"
@@ -708,6 +768,7 @@ cmd_start() {
     echo "  have looked exactly like a working session and transcribed to" >&2
     echo "  nothing." >&2
     echo "  command: ffmpeg $input -ac 1 -ar 16000 -c:a pcm_s16le $session/audio.wav" >&2
+    [ -z "${RF_FFMPEG_INPUT:-}" ] && echo "  input: $(device_label)" >&2
     echo "  fix: $SILENCE_HINT" >&2
     echo "  fix: if the input is right, $MIC_HINT" >&2
     rm -f "$CURRENT"
@@ -842,11 +903,35 @@ cmd_abort() {
 
 cmd_devices() {
   echo "avfoundation audio inputs. Pass the index to start --device, or set RF_DEVICE."
-  ffmpeg -hide_banner -f avfoundation -list_devices true -i "" 2>&1 \
-    | sed -n '/AVFoundation audio devices/,$p' \
-    | grep -E '^\[' \
-    | sed 's/^\[AVFoundation indev @ [^]]*\] //' \
-    | grep -E '^\[[0-9]+\]' || echo "  none found"
+  local inputs chosen
+  inputs="$(audio_inputs || true)"
+  if [ -z "$inputs" ]; then
+    echo "  none found"
+    return 0
+  fi
+  chosen="$(resolve_device)"
+  # Marked, because the whole point of this list is choosing between them and a
+  # list that does not say which one is in use answers half the question.
+  printf '%s\n' "$inputs" | while IFS=' ' read -r index name; do
+    if [ "$index" = "$chosen" ]; then
+      echo "[$index] $name  <- this session would record from here"
+    else
+      echo "[$index] $name"
+    fi
+  done
+}
+
+# The index the recorder would open, for a person or a case that wants to know
+# without starting a session.
+cmd_input_index() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --device) RF_DEVICE="${2:-}"; shift 2 ;;
+      *) die "input-index: unknown option '$1'" "recordfeedback input-index [--device N]" ;;
+    esac
+  done
+  resolve_device
+  echo
 }
 
 # ------------------------------------------------------------------------ last
@@ -1438,7 +1523,8 @@ recordfeedback <command>
   status          the live session, how long it has run, what it has captured
   abort           stop everything and throw the session away
   last            path of the newest session that has a feedback.md
-  devices         the avfoundation audio inputs and their indexes
+  devices         the avfoundation audio inputs, and which one is in use
+  input-index     the index the recorder would open, without starting a session
   doctor          check every dependency, the model, the microphone and the overlay
 USAGE
 }
@@ -1453,6 +1539,7 @@ main() {
     status) cmd_status "$@" ;;
     abort) cmd_abort "$@" ;;
     devices) cmd_devices "$@" ;;
+    input-index) cmd_input_index "$@" ;;
     last) cmd_last "$@" ;;
     wait) cmd_wait "$@" ;;
     stop) cmd_stop "$@" ;;

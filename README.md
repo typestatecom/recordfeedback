@@ -152,11 +152,17 @@ carrying on costs you only what you said while it was red. `start`
 refuses outright rather than beginning a session on a dead microphone,
 and `recordfeedback status` prints the level of a session in progress.
 
-The usual cause is not a permission. An avfoundation device index is not
-stable across reboots or plugged in devices, so if you have virtual
-audio devices installed, a mixer routed to nothing can take the index
-your microphone had. `recordfeedback devices` lists them and
-`--device N` picks one.
+The usual cause is not a permission. A session records from the input
+macOS itself is set to use, found by name, because an avfoundation index
+is not a device: it shifts when something is plugged in. On the machine
+this was built on, a pair of AirPods connecting moved the built in
+microphone from index 0 to index 1 and left a virtual mixer routed to
+nothing in its place, which records a file of zeros that looks exactly
+like a working session.
+
+`recordfeedback devices` lists the inputs and marks the one a session
+would use. `--device N` or `RF_DEVICE` overrides it, and an index you
+choose is used as you gave it.
 
 ### Talking to it instead of reaching for a key
 
@@ -224,7 +230,8 @@ recordfeedback stop
 recordfeedback status    the live session, how long it has run, what it captured
 recordfeedback abort     stop everything and throw the session away
 recordfeedback last      path of the newest session that has a feedback.md
-recordfeedback devices   the avfoundation audio inputs and their indexes
+recordfeedback devices   the audio inputs, and which one a session would use
+recordfeedback input-index  the index the recorder would open, on its own
 recordfeedback doctor    check every dependency, the model, the mic and the overlay
 ```
 

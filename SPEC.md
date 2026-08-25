@@ -243,6 +243,16 @@ changes it strands the caller as well as the session.
 
 ### `status`, `abort`, `last`, `devices`, `doctor`
 
+A session records from the input macOS itself is set to use, resolved by
+matching the system default input's name against the avfoundation list,
+and index 0 only when nothing can be matched. An index given with
+`--device` or `RF_DEVICE` is used as it was given. The indexes shift
+when a device is plugged in: on this machine a pair of AirPods
+connecting moved the built in microphone from index 0 to index 1 and put
+a virtual mixer routed to nothing in its place, which is a recording of
+zeros that looks exactly like a working session. `input-index` reports
+what would be opened without starting anything.
+
 `status` prints the active session, elapsed time, audio file size and
 screenshot count so far. `abort` stops everything and marks the session
 `aborted` without transcribing. `last` prints the path of the newest
@@ -727,7 +737,7 @@ Environment variables, all with working defaults:
 | `RF_HOME` | `~/.recordfeedback` | state and sessions |
 | `RF_MODEL` | the turbo model in `RF_HOME/models` | whisper model file |
 | `RF_LANG` | `auto` | language passed to `-l` |
-| `RF_DEVICE` | `0` | avfoundation audio input index |
+| `RF_DEVICE` | the input macOS is set to use, by name | avfoundation audio input index |
 | `RF_SHOT_DIR` | `defaults read com.apple.screencapture location`, else `~/Desktop` | where to look for screenshots |
 | `RF_KEEP_SHOTS` | unset | leave the originals in the screenshot folder instead of moving them |
 | `RF_FFMPEG_INPUT` | unset | replaces the whole avfoundation input, for tests |
