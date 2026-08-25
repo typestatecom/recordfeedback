@@ -51,6 +51,15 @@ SCREEN_HINT='Open System Settings, Privacy and Security, Screen and System Audio
 
 MIC_HINT='the terminal application needs Microphone permission in System Settings, Privacy and Security, Microphone. macOS asks once, and if the prompt was refused the switch has to be turned on by hand.'
 
+SILENCE_HINT='check that the right input is selected and that its volume is not at zero, in System Settings, Sound, Input. An avfoundation index is not stable across reboots or plugged in devices, so a virtual mixer that is routed to nothing can take the index the microphone had. Run recordfeedback devices to see the list and start --device N to pick one.'
+
+# A live microphone in a silent room still carries a noise floor, measured on
+# this machine between -70 and -77 dBFS. A stream of zeros reads as -inf. The
+# gap between them is wide enough that this threshold needs no tuning, and
+# anything below it is lost audio whether the cause is a denied permission, a
+# muted device or an input volume left at zero.
+DEAD_DBFS=-85
+
 # ------------------------------------------------------------------- plumbing
 
 # macOS ships no timeout(1), and every external call here can hang on a
@@ -106,6 +115,101 @@ ffmpeg_input() {
   else
     printf '%s' "-f avfoundation -i :$RF_DEVICE"
   fi
+}
+
+# A second output of the same recorder, so the level is measured on the stream
+# that will be transcribed and not on a second capture opened to ask. It has to
+# be a separate output because audio.wav is unreadable while the session runs:
+# the wav muxer holds every sample until ffmpeg exits and the file is still zero
+# bytes minutes in, with or without -flush_packets.
+#
+# The segment muxer is what makes it readable. It closes each file when the
+# segment ends, and a closed file is a flushed one, so a completed second is on
+# disk a second after it was spoken. Nothing else ffmpeg can write flushes while
+# it runs. segment_wrap bounds the cost: six files of one second each, about
+# 190 kB, whatever the length of the session.
+LEVEL_DIR=levels
+LEVEL_WRAP=6
+
+# The loudest recent second, in dBFS, or nothing when the recorder has not
+# finished a segment yet. The loudest and not the latest, because a person draws
+# breath mid sentence and a window that lands in the pause is silent for a
+# reason that has nothing wrong with it.
+level_dbfs() {
+  local session="$1"
+  [ -d "$session/$LEVEL_DIR" ] || return 1
+  python3 - "$session/$LEVEL_DIR" <<'PY'
+import array, math, os, sys, time
+
+directory = sys.argv[1]
+now = time.time()
+best = 0.0
+seen = False
+for name in os.listdir(directory):
+    if not name.endswith(".pcm"):
+        continue
+    path = os.path.join(directory, name)
+    try:
+        stat = os.stat(path)
+    except OSError:
+        continue
+    # Under segment_wrap the oldest files are overwritten in place, so age and
+    # not the name is what says whether a segment is still evidence. A recorder
+    # that died leaves loud segments behind and they must not read as alive.
+    if now - stat.st_mtime > 8:
+        continue
+    # An eighth of a second is the shortest window worth judging. Below that the
+    # segment is the one being written right now and holds a sliver.
+    if stat.st_size < 4000:
+        continue
+    try:
+        with open(path, "rb") as handle:
+            samples = array.array("h")
+            samples.frombytes(handle.read(stat.st_size // 2 * 2))
+    except OSError:
+        continue
+    if not samples:
+        continue
+    seen = True
+    total = 0
+    for one in samples:
+        total += one * one
+    best = max(best, math.sqrt(total / len(samples)))
+
+if not seen:
+    raise SystemExit(1)
+# Digital silence has no logarithm, and -inf is the honest answer rather than a
+# floor picked to keep the arithmetic tidy.
+print("-inf" if best == 0 else "%.1f" % (20 * math.log10(best / 32768.0)))
+PY
+}
+
+# True when the recorder is writing silence rather than quiet. Unknown counts as
+# alive, because a level that cannot be measured is a reason to say nothing and
+# never a reason to throw away somebody's session.
+input_is_dead() {
+  local session="$1" dbfs
+  dbfs="$(level_dbfs "$session")" || return 1
+  [ "$dbfs" = "-inf" ] && return 0
+  [ "$(python3 -c "print(1 if float('$dbfs') <= $DEAD_DBFS else 0)" 2>/dev/null || echo 0)" = 1 ]
+}
+
+# Waits for the recorder to finish enough segments to be worth judging, up to a
+# deadline in tenths of a second, and answers with the level it settled on.
+await_level() {
+  local session="$1" tenths="${2:-40}" waited=0 dbfs=""
+  while [ "$waited" -lt "$tenths" ]; do
+    local ready
+    ready="$(find "$session/$LEVEL_DIR" -name '*.pcm' -size +4000c 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$ready" -ge 2 ] && dbfs="$(level_dbfs "$session")"; then
+      printf '%s' "$dbfs"
+      return 0
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  dbfs="$(level_dbfs "$session")" || return 1
+  printf '%s' "$dbfs"
 }
 
 pid_alive() {
@@ -446,6 +550,7 @@ cmd_start() {
   mkfifo "$ctl"
   local input
   input="$(ffmpeg_input)"
+  mkdir -p "$session/$LEVEL_DIR"
   # 0<> keeps a writer on the FIFO inside ffmpeg itself, so the FIFO never
   # reaches end of file when this shell exits and q still arrives at stop.
   # shellcheck disable=SC2086
@@ -453,6 +558,9 @@ cmd_start() {
     -progress "$session/ffmpeg.progress" \
     $input \
     -ac 1 -ar 16000 -c:a pcm_s16le "$session/audio.wav" \
+    -ac 1 -ar 16000 -c:a pcm_s16le \
+    -f segment -segment_time 1 -segment_wrap "$LEVEL_WRAP" -segment_format s16le \
+    "$session/$LEVEL_DIR/%d.pcm" \
     0<>"$ctl" >"$session/ffmpeg.log" 2>&1 &
   local pid=$!
   echo "$pid" > "$session/ffmpeg.pid"
@@ -469,12 +577,37 @@ cmd_start() {
     waited=$((waited + 1))
   done
   if ! pid_alive "$pid" || [ "$recorded" -le 0 ]; then
+    # disown before the kill, or bash reports the dead job on the terminal and
+    # its notice lands under the fix the user is meant to read.
+    disown "$pid" 2>/dev/null || true
     kill -KILL "$pid" 2>/dev/null || true
     echo "recordfeedback: the recorder produced no audio." >&2
     echo "  command: ffmpeg $input -ac 1 -ar 16000 -c:a pcm_s16le $session/audio.wav" >&2
     echo "  last lines of $session/ffmpeg.log:" >&2
     tail -n 20 "$session/ffmpeg.log" 2>/dev/null | sed 's/^/    /' >&2
     echo "  fix: $MIC_HINT" >&2
+    rm -f "$CURRENT"
+    rm -rf "$session"
+    exit 1
+  fi
+
+  # A recorder that runs and captures silence is the failure that costs a whole
+  # session, because everything the user can see says it is working. It is
+  # refused here, where refusing costs nothing but the two seconds spent
+  # proving it, and never mid session, where refusing would throw away what the
+  # user has already said.
+  local dbfs
+  if dbfs="$(await_level "$session" 30)" && input_is_dead "$session" 6; then
+    disown "$pid" 2>/dev/null || true
+    kill -KILL "$pid" 2>/dev/null || true
+    echo "recordfeedback: the recorder is running but the input is silence." >&2
+    echo "  every sample it captured was zero, measured at $dbfs dBFS. A live" >&2
+    echo "  microphone in a quiet room reads about -70. Recording this would" >&2
+    echo "  have looked exactly like a working session and transcribed to" >&2
+    echo "  nothing." >&2
+    echo "  command: ffmpeg $input -ac 1 -ar 16000 -c:a pcm_s16le $session/audio.wav" >&2
+    echo "  fix: $SILENCE_HINT" >&2
+    echo "  fix: if the input is right, $MIC_HINT" >&2
     rm -f "$CURRENT"
     rm -rf "$session"
     exit 1
@@ -521,6 +654,17 @@ cmd_status() {
   echo "Recording for $(format_mmss "$secs")."
   echo "  session: $session"
   echo "  audio:   $(format_mmss $((recorded / 1000000))) captured"
+  local dbfs
+  if dbfs="$(level_dbfs "$session" 6)"; then
+    if input_is_dead "$session" 6; then
+      echo "  input:   SILENT at $dbfs dBFS, nothing is being recorded"
+      echo "           $SILENCE_HINT"
+    else
+      echo "  input:   $dbfs dBFS"
+    fi
+  else
+    echo "  input:   not reported yet"
+  fi
   echo "  shots:   $shots so far"
   local note
   note="$(jq -r '.note // ""' "$session/meta.json")"

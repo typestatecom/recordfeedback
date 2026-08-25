@@ -52,3 +52,11 @@ probe_overlay() {
   fi
   printf '%s\n' "$binary"
 }
+
+# Room tone: a session where nobody spoke. Measured at about -71 dBFS, which is
+# what this machine's microphone reads in a quiet room, so it is quiet enough
+# that stop calls the session silent and alive enough that start does not read
+# it as a dead input. anullsrc is not this. Every sample of anullsrc is zero,
+# which is a microphone that is not working, and a fixture that spells one of
+# those with the other is how a lost session gets written off as a quiet one.
+RF_ROOM_TONE='-f lavfi -i anoisesrc=r=16000:c=white:a=0.0005'

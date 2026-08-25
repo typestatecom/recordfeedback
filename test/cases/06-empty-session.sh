@@ -14,7 +14,7 @@ export RF_LANG=en
 # Digital silence, which is what a session with a muted microphone actually
 # produces. -re makes it arrive in real time like a microphone does, so the
 # recorder is still alive when stop asks it to quit.
-export RF_FFMPEG_INPUT="-re -f lavfi -i anullsrc=r=16000:cl=mono -t 30"
+export RF_FFMPEG_INPUT="-re $RF_ROOM_TONE -t 30"
 
 "$RFB" start --no-overlay > "$RF_CASE_TMP/start.out"
 session="$(sed -n 's/^  session: //p' "$RF_CASE_TMP/start.out")"

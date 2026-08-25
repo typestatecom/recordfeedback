@@ -2,7 +2,7 @@
 # Code blocks on it, and the exit code says why it came back.
 . "$REPO/test/lib.sh"
 
-export RF_FFMPEG_INPUT="-re -f lavfi -i anullsrc=r=16000:cl=mono -t 600"
+export RF_FFMPEG_INPUT="-re $RF_ROOM_TONE -t 600"
 
 start_session() {
   "$RFB" start --no-overlay > "$RF_CASE_TMP/start.out"

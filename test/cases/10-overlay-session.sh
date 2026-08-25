@@ -3,7 +3,7 @@
 # capture key that nothing was captured.
 . "$REPO/test/lib.sh"
 
-export RF_FFMPEG_INPUT="-re -f lavfi -i anullsrc=r=16000:cl=mono -t 600"
+export RF_FFMPEG_INPUT="-re $RF_ROOM_TONE -t 600"
 export RF_SHOT_DIR="$RF_CASE_TMP/shots"
 mkdir -p "$RF_SHOT_DIR"
 
