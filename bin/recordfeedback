@@ -119,18 +119,38 @@ voice_enabled() {
   [ "$(jq -r '.voice.enabled // false' "$file" 2>/dev/null)" = "true" ]
 }
 
+# The defaults the overlay falls back to when a key is missing. Named here too
+# because the CLI writes this file when --voice is used before an overlay has
+# ever run, and a block with only the switch in it is a file that answers none
+# of the questions a person opens it to ask.
+VOICE_TRIGGER_DEFAULT="let's"
+VOICE_ESCAPE_DEFAULT="not a command"
+
 set_voice_enabled() {
-  local wanted="$1" file
+  local wanted="$1" file on
   file="$(settings_file)"
   mkdir -p "$RF_HOME"
+  on="$([ "$wanted" = 1 ] && echo true || echo false)"
   local existing='{}'
   [ -f "$file" ] && existing="$(cat "$file")"
+  # The whole block is written, the switch alongside the words, so the file says
+  # what can be said and not only whether anything is listening. Whatever is
+  # already there wins, because it is what the user set.
+  #
   # A settings file that cannot be parsed leaves every default in place rather
-  # than costing the user their stop key, so a broken one is replaced and not
+  # than costing the user their stop key, so a broken one is replaced and never
   # merged into.
-  echo "$existing" | jq --argjson on "$([ "$wanted" = 1 ] && echo true || echo false)" \
-    '.voice = ((.voice // {}) | .enabled = $on)' > "$file.new" 2>/dev/null \
-    || echo "{\"voice\":{\"enabled\":$([ "$wanted" = 1 ] && echo true || echo false)}}" > "$file.new"
+  echo "$existing" | jq \
+    --argjson on "$on" \
+    --arg trigger "$VOICE_TRIGGER_DEFAULT" \
+    --arg escape "$VOICE_ESCAPE_DEFAULT" \
+    '.voice = ((.voice // {})
+               | .enabled = $on
+               | .trigger = (.trigger // $trigger)
+               | .escape = (.escape // $escape))' > "$file.new" 2>/dev/null \
+    || printf '{"voice":{"enabled":%s,"trigger":%s,"escape":%s}}\n' \
+         "$on" "$(printf '%s' "$VOICE_TRIGGER_DEFAULT" | jq -R .)" \
+         "$(printf '%s' "$VOICE_ESCAPE_DEFAULT" | jq -R .)" > "$file.new"
   mv "$file.new" "$file"
 }
 
@@ -716,6 +736,12 @@ cmd_start() {
     fi
   else
     echo "  no overlay, so no annotations. shift-cmd-4 still takes screenshots."
+    # The overlay is what listens, so this pair is a session that would have sat
+    # there not listening with nothing on the screen saying why.
+    if voice_enabled; then
+      echo "  voice control needs the overlay and there is none, so nothing is"
+      echo "  listening for spoken commands this session."
+    fi
   fi
   echo "  session: $session"
 }
