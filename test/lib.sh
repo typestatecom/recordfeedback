@@ -60,3 +60,16 @@ probe_overlay() {
 # which is a microphone that is not working, and a fixture that spells one of
 # those with the other is how a lost session gets written off as a quiet one.
 RF_ROOM_TONE='-f lavfi -i anoisesrc=r=16000:c=white:a=0.0005'
+
+# Cases that put windows on the screen and take pictures of it cannot run on a
+# machine nobody is sitting at, and are unwelcome on one somebody is working at.
+# RF_NO_SCREEN=1 skips them, so the rest of the suite can be run mid task
+# without windows appearing over what the person is doing.
+needs_screen() {
+  [ "${RF_NO_SCREEN:-0}" = 1 ] && skip "RF_NO_SCREEN is set, and this case puts windows on the screen"
+  local probe="$RF_CASE_TMP/needs-screen.png"
+  screencapture -x "$probe" > /dev/null 2>&1 \
+    || skip "screencapture cannot run without a screen"
+  [ -s "$probe" ] || skip "screencapture produced nothing, so there is no window server"
+  rm -f "$probe"
+}

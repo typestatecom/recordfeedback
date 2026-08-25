@@ -276,9 +276,16 @@ Environment: `RF_HOME`, `RF_MODEL`, `RF_LANG`, `RF_SHOT_DIR`,
 
 ```bash
 test/run.sh              the whole suite, one line per case
+RF_NO_SCREEN=1 test/run.sh   the same, minus the cases that use the screen
 overlay/build.sh         rebuild the Swift overlay
 overlay/build.sh --probes  the variant the test suite drives
 ```
+
+Some cases put windows on the screen, because that is the only honest way
+to test a tool made of windows. They never take the keyboard: the probe
+build does not activate itself or make a window key, so a case cannot
+pull the cursor out of what you are typing. `RF_NO_SCREEN=1` skips them
+entirely, which is the way to run the suite while you are working.
 
 The overlay is one Swift file per type, compiled by a single `swiftc`
 call over `overlay/`. The selftest probes the suite drives are compiled
@@ -289,6 +296,12 @@ The tests drive the real ffmpeg, whisper-cli, screencapture and AppKit
 rather than mocking them, using `RF_FFMPEG_INPUT` and a `say` fixture so
 no microphone and no person is needed. A test that mocks those tests
 nothing.
+
+Voice control is measured against real recordings rather than a
+synthesiser, in `test/voice/`. `extract.sh` cuts the commands out of a
+session that already happened, `record.sh` records new ones, and
+`35-voice-corpus` replays them through the recogniser that ships. It
+holds the number reached and refuses to let it fall.
 
 `docs/screenshots/make.sh` rebuilds the images in this file. It opens the
 page in a Chrome started on a throwaway profile, so the shots are signed

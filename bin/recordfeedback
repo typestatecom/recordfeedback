@@ -484,22 +484,17 @@ cmd_doctor() {
     fi
 
     # Only reported when it was asked for. Voice control is off by default, and
-    # a permission nobody needs is not a thing to report as missing.
-    local speech
-    speech="$("$OVERLAY_BIN" --check-speech 2>/dev/null || true)"
-    local speech_on speech_permission speech_ondevice
-    speech_on="$(printf '%s\n' "$speech" | sed -n 's/^enabled //p')"
-    speech_permission="$(printf '%s\n' "$speech" | sed -n 's/^permission //p')"
-    speech_ondevice="$(printf '%s\n' "$speech" | sed -n 's/^on-device //p')"
-    if [ "${speech_on:-0}" = 1 ]; then
-      if [ "$speech_permission" = granted ] && [ "${speech_ondevice:-0}" = 1 ]; then
-        check ok "voice control" "on, recognised on this Mac"
-      elif [ "$speech_permission" = refused ]; then
-        check fail "voice control" "on, but Speech Recognition was refused, so nothing is listening. Turn it on in System Settings, Privacy and Security, Speech Recognition."
-      elif [ "${speech_ondevice:-0}" != 1 ]; then
-        check fail "voice control" "on, but this machine has no offline recogniser for en-US, and recordfeedback will not send a recording of your session to a server. Download the offline dictation voice in System Settings, Keyboard, Dictation."
+    # what it needs is what the transcript needs, so there is nothing to report
+    # as missing on a machine that is not using it.
+    local voice voice_on voice_ready
+    voice="$("$OVERLAY_BIN" --check-voice 2>/dev/null || true)"
+    voice_on="$(printf '%s\n' "$voice" | sed -n 's/^enabled //p')"
+    voice_ready="$(printf '%s\n' "$voice" | sed -n 's/^ready //p')"
+    if [ "${voice_on:-0}" = 1 ]; then
+      if [ "${voice_ready:-0}" = 1 ]; then
+        check ok "voice control" "on, listening with whisper. In development and not yet reliable."
       else
-        check warn "voice control" "on, and Speech Recognition is $speech_permission. macOS asks at the start of the first session that listens, and nothing listens until it is answered."
+        check fail "voice control" "on, but it cannot listen. $(printf '%s\n' "$voice" | sed -n 's/^why //p')"
       fi
     fi
   else

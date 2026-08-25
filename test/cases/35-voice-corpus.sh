@@ -15,10 +15,15 @@
 OVERLAY="$(probe_overlay)" \
   || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
 
-speech="$("$OVERLAY" --check-speech 2>/dev/null || true)"
-state="$(printf '%s\n' "$speech" | sed -n 's/^permission //p')"
-[ "$state" = granted ] \
-  || skip "Speech Recognition is '$state'. Turn it on for this terminal in System Settings, Privacy and Security, Speech Recognition."
+# Voice control listens with whisper, so it needs the model. RF_MODEL defaults
+# inside RF_HOME, which is this case's own empty directory.
+export RF_MODEL="${RF_MODEL:-$HOME/.recordfeedback/models/ggml-large-v3-turbo-q5_0.bin}"
+[ -f "$RF_MODEL" ] || skip "the whisper model is not on this machine"
+export RF_LANG=en
+
+voice="$("$OVERLAY" --check-voice 2>/dev/null || true)"
+[ "$(printf '%s\n' "$voice" | sed -n 's/^ready //p')" = 1 ] \
+  || skip "voice control cannot run here: $(printf '%s\n' "$voice" | sed -n 's/^why //p')"
 
 manifest="$REPO/test/voice/manifest.tsv"
 [ -f "$manifest" ] \

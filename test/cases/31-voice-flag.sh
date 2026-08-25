@@ -54,7 +54,7 @@ OVERLAY="$(probe_overlay)" \
 cat > "$settings" <<'JSON'
 {"voice":{"enabled":true,"trigger":"computer","escape":"ignore this"}}
 JSON
-reads="$("$OVERLAY" --check-speech 2>/dev/null | sed -n 's/^enabled //p')"
+reads="$("$OVERLAY" --check-voice 2>/dev/null | sed -n 's/^enabled //p')"
 assert_eq "$reads" "1" \
   "the overlay ignored a settings file that has voice settings and no shortcuts"
 

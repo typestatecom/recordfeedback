@@ -148,7 +148,7 @@ extension Overlay {
     if settingsWindow == nil {
       settingsWindow = SettingsWindow(overlay: self)
     }
-    NSApp.activate(ignoringOtherApps: true)
+    if mayTakeFocus() { NSApp.activate(ignoringOtherApps: true) }
     settingsWindow?.show()
   }
 }

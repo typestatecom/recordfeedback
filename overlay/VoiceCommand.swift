@@ -289,18 +289,21 @@ struct VoiceGrammar {
     return found
   }
 
-  // Every phrase with the trigger in front of it, which is what a recogniser can
-  // be told to expect. Without it "let's draw" comes back as "let's throw":
-  // these are short, out of context, and the words this tool cares about are
-  // ordinary words with common neighbours.
+  // What the recogniser is told to expect, with the trigger in front of each.
+  // Without it "let's draw" comes back as "let's throw": these are short, out
+  // of context, and every word in them has a common neighbour that sounds like
+  // it.
+  //
+  // One phrase per command and not all of them. Whisper caps an initial prompt
+  // at half its text context, and the whole table is more than twice that, so
+  // passing everything gets it cut off mid list and the bias goes with it.
+  // Measured on the same 28 recordings: the whole table reaches 14, one phrase
+  // each reaches 20.
   func expectedPhrases() -> [String] {
-    var out: [String] = []
-    for command in VoiceCommand.allCases {
-      for phrase in phrases[command] ?? [] {
-        out.append(trigger + " " + phrase)
-      }
+    VoiceCommand.allCases.compactMap { command in
+      guard let first = phrases[command]?.first else { return nil }
+      return trigger + " " + first
     }
-    return out
   }
 
   // How many words of `words` from `at` are `needle`, or nothing. Both sides

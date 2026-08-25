@@ -11,8 +11,10 @@ extension Overlay {
     drawing = on
     for window in markWindows { window.ignoresMouseEvents = !on }
     if on {
-      NSApp.activate(ignoringOtherApps: true)
-      markWindows.first?.makeKeyAndOrderFront(nil)
+      if mayTakeFocus() {
+        NSApp.activate(ignoringOtherApps: true)
+        markWindows.first?.makeKeyAndOrderFront(nil)
+      }
       if keyMonitor == nil {
         // A local monitor catches the plain tool keys whichever screen's window
         // happens to be key, which a per view keyDown does not.

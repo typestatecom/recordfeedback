@@ -12,10 +12,7 @@ OVERLAY="$(probe_overlay)" \
 
 command -v screencapture > /dev/null 2>&1 || skip "no screencapture on this machine"
 
-probe="$RF_CASE_TMP/probe.png"
-screencapture -x "$probe" > /dev/null 2>&1 \
-  || skip "screencapture cannot run without a screen"
-[ -s "$probe" ] || skip "screencapture produced nothing, so there is no window server"
+needs_screen
 
 session="$RF_HOME/sessions/stray"
 mkdir -p "$session"

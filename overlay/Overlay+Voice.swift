@@ -5,10 +5,8 @@ extension Overlay {
   func startVoice() {
     guard Settings.shared.voiceEnabled else { return }
     #if RF_PROBES
-    // Asking for Speech Recognition puts a system dialog on the screen of
-    // whoever is running the tests, and it stays there until somebody answers
-    // it. A case that is about the settings and not about listening must not be
-    // able to do that.
+    // Listening spawns a whisper for every few seconds of audio, which a case
+    // about the settings has no use for and no way to wait out.
     let environment = ProcessInfo.processInfo.environment
     if environment["RF_OVERLAY_SELFTEST"] != nil, environment["RF_VOICE_LISTEN"] != "1" {
       warn("voice control is configured but the probe build is not listening.")

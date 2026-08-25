@@ -73,7 +73,14 @@ final class SettingsWindow: NSWindowController {
   func show() {
     refresh()
     window?.center()
-    window?.makeKeyAndOrderFront(nil)
+    // Ordered in without being made key when this is a test. The window is
+    // still on the screen and still readable by a probe, and the keyboard stays
+    // with whoever is using the machine.
+    if mayTakeFocus() {
+      window?.makeKeyAndOrderFront(nil)
+    } else {
+      window?.orderFrontRegardless()
+    }
   }
 
   private func build(in window: NSWindow) {
@@ -163,9 +170,9 @@ final class SettingsWindow: NSWindowController {
     y -= 34
 
     let why = NSTextField(labelWithString:
-      "Recognition runs on this Mac and no audio leaves it. macOS asks for"
-      + " Speech Recognition the first time a session starts listening."
-      + " Spoken commands are kept out of the transcript and listed on their own.")
+      "In development and not yet reliable. Recognition runs on this Mac with"
+      + " whisper, the same one that writes the transcript, and no audio leaves"
+      + " it. Spoken commands are kept out of the transcript and listed on their own.")
     why.frame = NSRect(x: 20, y: y - 14, width: width - 40, height: 44)
     why.font = NSFont.systemFont(ofSize: 11)
     why.textColor = .secondaryLabelColor

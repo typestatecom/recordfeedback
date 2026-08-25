@@ -12,9 +12,7 @@ command -v uv > /dev/null 2>&1 || skip "no uv, so pillow cannot count the pixels
 
 # A headless runner has no window server, so the whole case is meaningless
 # rather than failing.
-probe="$RF_CASE_TMP/probe.png"
-screencapture -x "$probe" > /dev/null 2>&1 || skip "screencapture cannot run without a screen"
-[ -s "$probe" ] || skip "screencapture produced nothing, so there is no screen to test"
+needs_screen
 
 count_red() {
   uv run --quiet --with pillow python -c '
@@ -31,8 +29,11 @@ print(mask.convert("L").histogram()[255])
 }
 
 # The screen may already hold something red, so the question is never how much
-# red is there but how much the overlay added.
-before="$(count_red "$probe")"
+# red is there but how much the overlay added. Taken here rather than reusing
+# the picture needs_screen took, which it cleans up after itself.
+before_shot="$RF_CASE_TMP/before.png"
+screencapture -x "$before_shot" || skip "screencapture stopped working"
+before="$(count_red "$before_shot")"
 
 session="$RF_HOME/sessions/pixels"
 mkdir -p "$session"

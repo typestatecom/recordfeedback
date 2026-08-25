@@ -47,20 +47,22 @@ $mic_line" ;;
 esac
 assert_contains "$mic_line" "zero" "the failing microphone line must say what is wrong"
 
-# SFSpeechRecognizer hands back a recogniser for a locale it does not support,
-# reporting itself available and on device, and then recognises nothing at all.
-# This machine's own locale is one of those, so the language voice control
-# listens in has to be checked against the supported list and never trusted to
-# the object's own account of itself.
+# Voice control listens with whisper, the same engine that writes the
+# transcript, so what it needs is what the transcript needs and doctor can say
+# so without a permission being involved at all.
 overlay="$REPO/bin/rf-overlay"
 if [ -x "$overlay" ]; then
-  for lang in auto en de; do
-    out="$(RF_LANG="$lang" "$overlay" --check-speech 2>/dev/null || true)"
-    chosen="$(printf '%s\n' "$out" | sed -n 's/^locale //p')"
-    ok="$(printf '%s\n' "$out" | sed -n 's/^locale-supported //p')"
-    [ -n "$chosen" ] || fail "--check-speech reported no locale for RF_LANG=$lang"
-    assert_eq "$ok" "1" \
-      "RF_LANG=$lang chose '$chosen', which macOS does not recognise in. It would
-  return a recogniser that says it is available and then hear nothing."
-  done
+  out="$("$overlay" --check-voice 2>/dev/null || true)"
+  assert_contains "$out" "engine whisper" "--check-voice names the engine"
+  ready="$(printf '%s\n' "$out" | sed -n 's/^ready //p')"
+  case "$ready" in
+    0|1) ;;
+    *) fail "--check-voice did not say whether it can listen. Got:
+$out" ;;
+  esac
+  # A machine that cannot listen has to say why, or the switch in the settings
+  # window turns on something that then does nothing.
+  if [ "$ready" = 0 ]; then
+    assert_contains "$out" "why " "--check-voice must say why it cannot listen"
+  fi
 fi

@@ -750,7 +750,9 @@ Environment variables, all with working defaults:
 | `RF_FFMPEG_INPUT` | unset | replaces the whole avfoundation input, for tests |
 | `RF_DEAD_DBFS` | `-85` | level at or below which the input counts as silence, passed to the overlay by `start` |
 | `RF_DEAD_SECONDS` | `4` | silence before the palette raises its alarm |
-| `RF_VOICE_LISTEN` | unset | in the probe build only, `1` lets a case start the recogniser. Without it a probe never asks for Speech Recognition, so the suite cannot put a system dialog on somebody's screen |
+| `RF_VOICE_LISTEN` | unset | in the probe build only, `1` lets a case start the recogniser. Without it a probe never spawns whisper for audio it has no use for |
+| `RF_NO_SCREEN` | unset | `1` skips the cases that put windows on the screen, so the suite can be run on a machine somebody is working at |
+| `RF_WHISPER` | `whisper-cli` on the usual paths | the binary voice control listens with |
 
 The settings file `~/.recordfeedback/settings.json` carries the
 shortcuts and, under `voice`, `enabled`, `trigger`, `escape` and
@@ -775,6 +777,15 @@ gets written off as a quiet one.
 `test/run.sh` runs every case and prints one line each. No framework.
 Exit non-zero if any case fails. Every case cleans up its own session
 directories, under `RF_HOME=$repo/test/tmp/home`.
+
+The suite runs on the machine somebody is working at, so it may not take
+that machine away from them. Two rules follow. The probe build never
+calls `NSApp.activate` or makes a window key: a case drives the code
+directly and has no use for real focus, while every case that entered
+draw mode used to pull the keyboard out of whatever the person was
+typing in. And `RF_NO_SCREEN=1` skips the cases that put windows on the
+screen, through `needs_screen` in `test/lib.sh`, so the rest can be run
+mid task without anything appearing over the work.
 
 The cases that must exist:
 

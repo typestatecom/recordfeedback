@@ -11,10 +11,7 @@ RF_OVERLAY_BIN="$(probe_overlay)" \
   || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
 export RF_OVERLAY_BIN
 
-probe="$RF_CASE_TMP/probe.png"
-screencapture -x "$probe" > /dev/null 2>&1 \
-  || skip "screencapture cannot run without a screen"
-[ -s "$probe" ] || skip "screencapture produced nothing, so there is no window server"
+needs_screen
 
 export RF_FFMPEG_INPUT="-re -f lavfi -i sine=frequency=440:sample_rate=16000"
 # The overlay presses its own stop once its windows are up, and nothing at all

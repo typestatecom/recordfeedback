@@ -12,17 +12,16 @@
 OVERLAY="$(probe_overlay)" \
   || skip "the overlay does not build here: $(tail -n 1 "$RF_CASE_TMP/build.log")"
 
-speech="$("$OVERLAY" --check-speech 2>/dev/null || true)"
-state="$(printf '%s\n' "$speech" | sed -n 's/^permission //p')"
-[ "$state" = granted ] \
-  || skip "Speech Recognition is '$state'. Turn it on for this terminal in System Settings, Privacy and Security, Speech Recognition, and this case runs."
-[ "$(printf '%s\n' "$speech" | sed -n 's/^on-device //p')" = 1 ] \
-  || skip "this machine has no offline recogniser, and recordfeedback will not use the network one"
-
-# The transcript is half of what this case asserts, so it needs the real model.
-# RF_MODEL defaults inside RF_HOME, which is this case's own empty directory.
+# The transcript is half of what this case asserts, and voice control listens
+# with the same model, so both need it. RF_MODEL defaults inside RF_HOME, which
+# is this case's own empty directory, so it is pointed at the real one before
+# anything is asked about whether listening can work.
 export RF_MODEL="$HOME/.recordfeedback/models/ggml-large-v3-turbo-q5_0.bin"
 [ -f "$RF_MODEL" ] || skip "the whisper model is not on this machine"
+
+voice="$("$OVERLAY" --check-voice 2>/dev/null || true)"
+[ "$(printf '%s\n' "$voice" | sed -n 's/^ready //p')" = 1 ] \
+  || skip "voice control cannot run here: $(printf '%s\n' "$voice" | sed -n 's/^why //p')"
 
 export RF_LANG=en
 export RF_VOICE_LISTEN=1
