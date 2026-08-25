@@ -662,7 +662,11 @@ and a reader who takes them for feedback acts on them a second time. The
 two recognisers do not agree word for word, so the phrase is found by
 overlap within a few seconds of where it was logged, and a command that
 cannot be found is reported as not having been removed rather than
-having the transcript cut at a guess.
+having the transcript cut at a guess. Only the characters the matched
+words occupied are cut, because rebuilding the segment from its words
+costs every other sentence in it its capitals and its punctuation, and
+whether the command shares a segment with feedback is whisper's choice
+and not this tool's.
 
 The settings window carries this on a tab of its own: the switch, the
 trigger word, the escape phrase, and every command's phrases one per

@@ -647,3 +647,54 @@ Phrases are a list the user edits, several per command, because one
 phrasing is the author's and a person mid sentence uses their own. An
 empty trigger is refused when it is set, since it would arm every phrase
 in the table on ordinary speech.
+
+## 2026-08-25 SFSpeechRecognizer lies about which locales it supports
+
+`SFSpeechRecognizer(locale:)` returns a recogniser for a locale it does
+not support. That object reports `isAvailable` true and
+`supportsOnDeviceRecognition` true, and then recognises nothing at all,
+with no result and no error to say why. Membership of
+`supportedLocales()` is the only trustworthy answer, and it is what the
+code checks.
+
+This is not an edge case. A Mac set to English in a country Apple has no
+English recogniser for reports its locale as `en_DE`, which is exactly
+one of these, so the default path walked straight into it. The language
+is picked from the supported list: the exact identifier, then the
+machine's language in its own region, then the language in its own
+country, then in the United States, then any supported region for that
+language, and `doctor` prints what it settled on.
+
+## 2026-08-25 A spoken command is only acted on once nothing longer can arrive
+
+A recogniser builds its sentence a word at a time and hands over every
+version of it. "let's take a screenshot" is complete and correct several
+handovers before "of this area" arrives, so acting on the first complete
+match took a full screen shot when the user asked for a region.
+
+Waiting for the recogniser to declare the sentence final would cost the
+responsiveness that makes this worth using, so a match instead says
+whether the words heard since it still agree with a longer phrase that
+begins the same way. "of" is the next word of "of this area" and not a
+new thought, so the match waits. "and then I will explain" agrees with
+nothing longer, so the short command is what was said and it fires. The
+cost is that a command which begins a longer one lands a beat later than
+one that does not.
+
+Recognisers also drop articles, "take screenshot of this area" for audio
+that said "take a screenshot of this area", so articles are removed from
+both sides before matching. They are never what a command turns on.
+
+## 2026-08-25 A scrubbed segment is cut, not rebuilt
+
+Taking a spoken command out of a transcript segment by rebuilding the
+segment from its normalised words costs every other sentence in it its
+capitals and its punctuation, and that paragraph is the document a
+person reads. Only the characters the matched words occupied are
+removed, with any punctuation that trailed them.
+
+Whether the command gets a segment of its own is whisper's choice and
+not this tool's, and the defect only appeared when it shared one. So the
+case that covers it is driven from a written transcript rather than from
+audio: a defect that shows on only one of whisper's choices is one that
+ships.
