@@ -49,6 +49,10 @@ final class Overlay: NSObject, NSApplicationDelegate {
   // the row says what it heard for a moment afterwards.
   var voiceHeardTitle: String?
   var voiceHeardAt = Date.distantPast
+  // What a replay heard and what it acted on, collected for the probe.
+  var replayHeard: [String] = []
+  var replayLines: [String] = []
+  var replayFired: [String] = []
   var settingsWindow: SettingsWindow?
   // Set the instant Stop is pressed, so the row and the menu bar can say the
   // click landed before anything downstream has had time to answer it.
@@ -135,6 +139,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "grammar" {
       probeGrammar()
+    }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "voice-replay" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.probeVoiceReplay() }
     }
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "voice-toggle" {
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.probeVoiceToggle() }

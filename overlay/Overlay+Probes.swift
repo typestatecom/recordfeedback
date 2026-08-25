@@ -254,6 +254,65 @@ extension Overlay {
       .write(toFile: self.session + "/toggle.probe", atomically: true, encoding: .utf8)
   }
 
+  // Puts recordings through the real recogniser and the real grammar and says
+  // what it decided about each. This is what lets a suite be built out of a
+  // person's own voice, in their own accent, saying a command the way they
+  // actually say it.
+  func probeVoiceReplay() {
+    let listPath = ProcessInfo.processInfo.environment["RF_VOICE_CLIPS"] ?? ""
+    let clips = ((try? String(contentsOfFile: listPath, encoding: .utf8)) ?? "")
+      .split(separator: "\n").map(String.init).filter { !$0.isEmpty }
+    guard !clips.isEmpty else {
+      write(replay: ["error no clips"])
+      return
+    }
+    replayLines = []
+    playNext(clips, 0)
+  }
+
+  private func playNext(_ clips: [String], _ index: Int) {
+    guard index < clips.count else {
+      write(replay: replayLines)
+      return
+    }
+    let clip = clips[index]
+    let name = (clip as NSString).lastPathComponent
+    let listener = VoiceListener(session: session, grammar: Settings.shared.grammar(),
+                                 startedAt: startedAt)
+    listener.delegate = self
+    voice = listener
+    replayFired = []
+
+    guard listener.startForReplay() else {
+      write(replay: ["error unavailable"])
+      return
+    }
+
+    // Whichever comes first: the recogniser saying it has finished, or a
+    // deadline, because a clip it makes nothing of never settles.
+    var moved = false
+    let advance: () -> Void = { [weak self] in
+      guard let self = self, !moved else { return }
+      moved = true
+      let heard = self.voice?.lastHeard ?? ""
+      let fired = self.replayFired.isEmpty
+        ? "none" : self.replayFired.map { $0.split(separator: "|")[0] }.joined(separator: ",")
+      self.replayLines.append("clip \(name) \(fired) | \(heard)")
+      self.voice?.stop()
+      self.voice = nil
+      self.playNext(clips, index + 1)
+    }
+    listener.onSettled = { DispatchQueue.main.async(execute: advance) }
+    listener.replay(wav: clip) {}
+    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { advance() }
+  }
+
+  private func write(replay lines: [String]) {
+    try? (lines.joined(separator: "\n") + "\n")
+      .write(toFile: self.session + "/replay.probe", atomically: true, encoding: .utf8)
+    NSApp.terminate(nil)
+  }
+
   // A phrase added in the settings window has to be a phrase that works. The
   // list is edited in one place, saved in another and matched in a third, and a
   // phrase that reaches the file but not the grammar is a setting that lies.

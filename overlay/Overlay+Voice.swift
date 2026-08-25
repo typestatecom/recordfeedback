@@ -127,6 +127,9 @@ extension Overlay {
 
 extension Overlay: VoiceListenerDelegate {
   func voiceHeard(_ matches: [VoiceMatch], at offset: TimeInterval) {
+    #if RF_PROBES
+    for match in matches { replayFired.append(match.command.rawValue + "|" + match.phrase) }
+    #endif
     for match in matches {
       // Written down before it is acted on. Stop ends the process, and a
       // command that ended the session without leaving a record of itself is

@@ -53,6 +53,13 @@ final class VoiceListener {
   private let taskLife: TimeInterval = 50
 
   private(set) var running = false
+  // The last thing the recogniser said it heard. Read by the replay probe, so a
+  // case can report what a person's voice actually became before it says
+  // whether the right command came out of it.
+  private(set) var lastHeard = ""
+  // Called once the recogniser has finished with a replayed clip, so a case can
+  // move on to the next one instead of waiting out a fixed timer for each.
+  var onSettled: (() -> Void)?
 
   // The language to listen in, chosen only from the ones macOS actually
   // recognises in.
@@ -172,6 +179,44 @@ final class VoiceListener {
     }
   }
 
+  // Feeds a recording straight in, instead of waiting for a recorder to write
+  // it a second at a time. This is how a case puts a person's own voice through
+  // the real recogniser and the real grammar: the only part of the live path it
+  // skips is reading the segment files, which has a case of its own.
+  func replay(wav: String, whenDone: @escaping () -> Void) {
+    guard let data = FileManager.default.contents(atPath: wav), data.count > 44 else {
+      delegate?.voiceFailed("no audio at " + wav)
+      whenDone()
+      return
+    }
+    // The header of a 16 kHz mono PCM wav, which is what the recorder writes
+    // and what the fixtures are made in.
+    let body = data.dropFirst(44)
+    let chunk = 16000 * 2
+    var offset = body.startIndex
+    while offset < body.endIndex {
+      let end = body.index(offset, offsetBy: chunk, limitedBy: body.endIndex) ?? body.endIndex
+      feed(Data(body[offset..<end]))
+      offset = end
+    }
+    request?.endAudio()
+    whenDone()
+  }
+
+  // Starts without asking for the audio to arrive from a recorder, for replay.
+  func startForReplay() -> Bool {
+    guard SFSpeechRecognizer.authorizationStatus() == .authorized else { return false }
+    let name = Self.locale()
+    let supported = SFSpeechRecognizer.supportedLocales()
+      .contains { $0.identifier.replacingOccurrences(of: "-", with: "_") == name }
+    guard supported, let recognizer = SFSpeechRecognizer(locale: Locale(identifier: name)),
+          recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return false }
+    self.recognizer = recognizer
+    running = true
+    restartTask()
+    return true
+  }
+
   func stop() {
     running = false
     timer?.invalidate()
@@ -204,7 +249,14 @@ final class VoiceListener {
         return
       }
       guard let result = result else { return }
-      self.consider(result.bestTranscription.formattedString, settled: result.isFinal)
+      let text = result.bestTranscription.formattedString
+      self.lastHeard = text
+      self.consider(text, settled: result.isFinal)
+      if result.isFinal {
+        let settled = self.onSettled
+        self.onSettled = nil
+        settled?()
+      }
     }
   }
 
