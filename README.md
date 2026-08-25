@@ -123,17 +123,18 @@ gear in the palette or its menu bar item.
 The palette has two rows. While you are only talking it stays out of the
 way:
 
-![The quiet palette: timer, draw, screenshot, region, settings, shot count and stop](docs/screenshots/palette-quiet.png)
+![The quiet palette: timer, input meter, draw, screenshot, region, spoken commands, settings, shot count and stop](docs/screenshots/palette-quiet.png)
 
 and it opens into the full row when you start drawing:
 
-![The full palette: timer, five tools, done, clear, six colours, width, capture, settings, shot count and stop](docs/screenshots/palette.png)
+![The full palette: timer, input meter, five tools, done, clear, six colours, width, capture, spoken commands, settings, shot count and stop](docs/screenshots/palette.png)
 
 Every key is written under the control it belongs to, so the palette is
-also the reminder. Left to right: how long the session has run, the five
-tools, the two ways back out of a mistake, the six colours, the width,
-the two capture keys, the settings gear, how many screenshots you have
-taken, and stop.
+also the reminder. Left to right: how long the session has run, whether
+it can hear you, the five tools, the two ways back out of a mistake, the
+six colours, the width, the two capture keys, the microphone that starts
+and stops spoken commands, the settings gear, how many screenshots you
+have taken, and stop.
 
 The marks are on the screen, so they are inside the image. A region
 capture crops the same marks.

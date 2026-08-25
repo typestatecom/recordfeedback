@@ -312,6 +312,27 @@ extension Overlay {
   // Apple's business and needs a permission a test cannot grant, but what this
   // tool does with a heard sentence is this tool's business and is decided
   // here, so it is answered without a microphone or a person.
+  // One second of a voice at a conversational level, written where the recorder
+  // would have written it.
+  func writePosterLevel() {
+    let directory = session + "/levels"
+    try? FileManager.default.createDirectory(atPath: directory,
+                                             withIntermediateDirectories: true)
+    let frames = 16000
+    var samples = [Int16](repeating: 0, count: frames)
+    for index in 0..<frames {
+      // A tone rather than noise, because what is being drawn is one number and
+      // a tone reaches it with arithmetic anybody can check. The amplitude puts
+      // the meter around two thirds up, which is where speech sits.
+      let phase = Double(index) * 2 * Double.pi * 180 / 16000
+      samples[index] = Int16(sin(phase) * 2300)
+    }
+    let data = samples.withUnsafeBufferPointer { Data(buffer: $0) }
+    for name in ["0.pcm", "1.pcm"] {
+      try? data.write(to: URL(fileURLWithPath: directory + "/" + name))
+    }
+  }
+
   func probeGrammar() {
     let source = ProcessInfo.processInfo.environment["RF_VOICE_HEARD"] ?? ""
     let heard = (try? String(contentsOfFile: source, encoding: .utf8)) ?? ""
@@ -594,6 +615,13 @@ extension Overlay {
     guard let screen = NSScreen.main else { return }
     let size = screen.frame.size
     let quiet = ProcessInfo.processInfo.environment["RF_POSTER_QUIET"] == "1"
+
+    // A level for the meter to show. There is no recorder behind a poster, so
+    // without this the picture advertises the meter in the one state that means
+    // it has heard nothing yet, which is both the least useful thing to show
+    // and not what a session looks like.
+    writePosterLevel()
+    inputLevel.poll()
 
     if !quiet {
       setDrawing(true)
