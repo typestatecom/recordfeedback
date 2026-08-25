@@ -1174,8 +1174,12 @@ cmd_stop() {
   set_meta "$session" status done
   rm -f "$CURRENT"
 
+  # The same verdict the document is built on. Whisper writes words out of
+  # silence, so counting the transcript here put a word count directly above a
+  # document saying nothing was said, and the count is the line a person reads
+  # first.
   local words=0
-  [ "$transcribed" -eq 0 ] && words="$(transcript_words "$session")"
+  [ "$transcribed" -eq 0 ] && [ "$silent" = false ] && words="$(transcript_words "$session")"
   echo "Session finished."
   echo "  $(format_mmss "$(elapsed_seconds "$session/start.ref" "$session/stop.ref")") recorded, $words words, $shots screenshot$([ "$shots" = 1 ] || echo s)."
   echo "  session: $session"

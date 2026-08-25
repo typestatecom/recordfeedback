@@ -11,9 +11,9 @@ mkdir -p "$folder"
 export RF_SHOT_DIR="$folder"
 export RF_LANG=en
 
-# Digital silence, which is what a session with a muted microphone actually
-# produces. -re makes it arrive in real time like a microphone does, so the
-# recorder is still alive when stop asks it to quit.
+# Room tone, which is what a session nobody spoke in actually sounds like. -re
+# makes it arrive in real time like a microphone does, so the recorder is still
+# alive when stop asks it to quit.
 export RF_FFMPEG_INPUT="-re $RF_ROOM_TONE -t 30"
 
 "$RFB" start --no-overlay > "$RF_CASE_TMP/start.out"
@@ -41,6 +41,13 @@ case "$lower" in
   *) fail "the document does not say the recording was silent. Got:
 $doc" ;;
 esac
+
+# Whisper writes words out of silence, "Thank you." above all, and the summary
+# counted them. So stop said how many words were spoken directly above a
+# document saying nothing was, and the number is the line a person reads first.
+summary="$(echo "$out" | sed -n 's/^  \(.*recorded.*\)$/\1/p')"
+echo "--- summary ---"; echo "$summary"
+assert_contains "$summary" "0 words" "the summary of a session nobody spoke in"
 
 # stop is idempotent, and it is called twice whenever a person uses the hotkey
 # and then the slash command.
