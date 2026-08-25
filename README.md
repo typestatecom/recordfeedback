@@ -113,7 +113,7 @@ the ones actually bound, since you can rebind all of them:
 | `opt-shift-Z` | undo |
 | `opt-shift-C` | clear |
 | `opt-shift-H` | hide the marks |
-| `opt-shift-V` | start or stop listening for spoken commands |
+| `opt-shift-V` | start or stop listening for spoken commands (in development) |
 
 In draw mode: `p` pen, `a` arrow, `r` rectangle, `h` highlighter, `t`
 text. `1` to `6` pick a colour, `[` and `]` change the width, `esc` or
@@ -165,6 +165,13 @@ would use. `--device N` or `RF_DEVICE` overrides it, and an index you
 choose is used as you gave it.
 
 ### Talking to it instead of reaching for a key
+
+**Voice control is in active development and is not yet reliable.** In
+testing it misses commands often enough to be frustrating: the same
+phrase said the same way is heard one time and not the next, and "let's
+draw" in particular is unreliable. It is off by default, everything else
+in this tool works without it, and the keys and the palette do all of
+the same jobs. Turn it on to try it, not to depend on it.
 
 Voice control is off until you turn it on, with `recordfeedback start
 --voice` or the Voice tab in the settings window. Then:
@@ -223,6 +230,7 @@ The slash command drives this, and you can too.
 recordfeedback start [--note TEXT] [--device N] [--no-overlay]
                      [--voice | --no-voice]
                 begin a session: record audio and arm the overlay
+                --voice is in development and not yet reliable
 recordfeedback wait [--timeout SECONDS]
                 block until the stop hotkey, the recorder dying, or a timeout
 recordfeedback stop

@@ -619,6 +619,13 @@ overlay. Region and full screen capture include it.
 
 ### Voice control
 
+In active development and not yet reliable. Measured on this machine
+across a two minute session in the author's own voice, seven commands
+landed out of considerably more attempts, and "let's draw" did not land
+once in about ten tries. Everything else in the tool works without it and
+the keys and the palette do all of the same jobs, so it stays off by
+default and the README says plainly that it is not to be depended on.
+
 Off until it is asked for, with `--voice` or the settings window. It
 needs a macOS permission of its own and a tool that starts listening for
 orders because it was installed is not one a person can predict.
