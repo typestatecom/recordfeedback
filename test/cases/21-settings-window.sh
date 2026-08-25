@@ -44,11 +44,21 @@ assert_eq "$(field opened)" "1" \
   "the settings window opens. The probe said:
 $contents"
 
-# Seven actions and a restore button.
-[ "$(field buttons)" -eq 8 ] \
-  || fail "the settings window has $(field buttons) buttons and there are seven
-  shortcuts plus the way back to the defaults. An action with no button is an
-  action nobody can rebind. The probe said:
+# The window carries more than the keys now, and a page that is not on top is
+# not in the view hierarchy, so counting buttons off the window counts whichever
+# tab happens to be showing. The window is asked instead.
+assert_contains "$(field tabs)" "Shortcuts" \
+  "the shortcuts are on a tab of their own. The probe said:
+$contents"
+assert_contains "$(field tabs)" "Voice" \
+  "what can be said is editable, and a list of phrases in a settings file
+  nobody is told about is a list nobody edits. The probe said:
+$contents"
+
+[ "$(field shortcut-buttons)" -eq 7 ] \
+  || fail "the settings window has $(field shortcut-buttons) shortcut buttons and
+  there are seven shortcuts. An action with no button is an action nobody can
+  rebind. The probe said:
 $contents"
 
 assert_contains "$(field titles)" "Restore defaults" \

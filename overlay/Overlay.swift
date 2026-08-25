@@ -136,6 +136,9 @@ final class Overlay: NSObject, NSApplicationDelegate {
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "grammar" {
       probeGrammar()
     }
+    if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "voice-settings" {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.probeVoiceSettings() }
+    }
     // Opens the settings window, because a window written blind is a window
     // that crashes the first time somebody reaches for it.
     if ProcessInfo.processInfo.environment["RF_OVERLAY_SELFTEST"] == "settings" {

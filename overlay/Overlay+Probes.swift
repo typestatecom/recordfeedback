@@ -214,6 +214,60 @@ extension Overlay {
     }
   }
 
+  // A phrase added in the settings window has to be a phrase that works. The
+  // list is edited in one place, saved in another and matched in a third, and a
+  // phrase that reaches the file but not the grammar is a setting that lies.
+  func probeVoiceSettings() {
+    openSettings()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+      var lines: [String] = []
+      let window = self.settingsWindow
+      lines.append("tabs " + (window?.tabTitles ?? []).joined(separator: ","))
+      // A tab that is never selected is a tab that is never laid out, and a
+      // page that crashes on first sight is exactly what this is here to catch.
+      window?.showVoiceTab()
+      // What the editor is showing for whichever command the window selected
+      // for itself, before the probe touches anything.
+      let shown = window?.editorText ?? ""
+      lines.append("editor-lines \(shown.isEmpty ? 0 : shown.split(separator: "\n").count)")
+
+      // Through the same calls the window's own controls make, so what is
+      // proven is the path a person's typing takes and not a private one.
+      Settings.shared.setVoiceEnabled(true)
+      Settings.shared.setVoiceWords(trigger: "computer", escape: "ignore this")
+      Settings.shared.setVoicePhrases(.toolArrow, to: ["point at that", "stick an arrow on it"])
+      lines.append("enabled \(Settings.shared.voiceEnabled ? 1 : 0)")
+      lines.append("trigger \(Settings.shared.voiceTrigger)")
+
+      // An empty trigger would make every phrase in the table fire on ordinary
+      // speech, so it is refused and the one in force stands.
+      Settings.shared.setVoiceWords(trigger: "   ", escape: "ignore this")
+      lines.append("trigger-after-empty \(Settings.shared.voiceTrigger)")
+
+      let grammar = Settings.shared.grammar()
+      func read(_ said: String) -> String {
+        let found = grammar.matches(in: said)
+        return found.isEmpty ? "none" : found.map { $0.command.rawValue }.joined(separator: ",")
+      }
+      lines.append("added \(read("computer point at that"))")
+      lines.append("added-second \(read("computer stick an arrow on it"))")
+      // The phrases that were replaced are gone, not merged with the new ones.
+      lines.append("replaced \(read("computer pick arrow"))")
+      // The old trigger is not a trigger any more.
+      lines.append("old-trigger \(read("let's point at that"))")
+      lines.append("escaped \(read("ignore this computer point at that"))")
+
+      // Written to the file, because the CLI reads it to decide what to print
+      // and the next session reads it to know what can be said.
+      let saved = (try? String(contentsOfFile: Settings.shared.path, encoding: .utf8)) ?? ""
+      lines.append("saved-phrase \(saved.contains("point at that") ? 1 : 0)")
+      lines.append("saved-enabled \(saved.contains("\"enabled\" : true") ? 1 : 0)")
+
+      try? (lines.joined(separator: "\n") + "\n")
+        .write(toFile: self.session + "/voice.probe", atomically: true, encoding: .utf8)
+    }
+  }
+
   // The grammar, driven by sentences from a file. What the recogniser hears is
   // Apple's business and needs a permission a test cannot grant, but what this
   // tool does with a heard sentence is this tool's business and is decided
@@ -345,14 +399,34 @@ extension Overlay {
                                 atomically: true, encoding: .utf8)
         return
       }
-      let buttons = window.contentView?.subviews.compactMap { $0 as? NSButton } ?? []
-      var lines = ["opened \(window.isVisible ? 1 : 0)",
-                   "buttons \(buttons.count)",
-                   "titles " + buttons.map { $0.title }.joined(separator: ","),
-                   "level \(window.level.rawValue)",
-                   "palette-level \(self.paletteWindow?.level.rawValue ?? 0)",
-                   "over-palette "
-                     + "\((self.paletteWindow.map { window.frame.intersects($0.frame) } ?? false) ? 1 : 0)"]
+      // Asked of the window and not counted off its content view. Every control
+      // lives inside a tab page now, and a probe that reads the top level finds
+      // an empty window and calls it a pass.
+      func descend(_ view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { descend($0) }
+      }
+      let all = window.contentView.map { descend($0) } ?? []
+      let buttons = all.compactMap { $0 as? NSButton }
+      let shortcutButtons: [NSButton] = self.settingsWindow?.shortcutButtons ?? []
+      let tabs: [String] = self.settingsWindow?.tabTitles ?? []
+      let buttonTitles: String = buttons.map { $0.title }.joined(separator: ",")
+      let shortcutTitles: String = shortcutButtons.map { $0.title }.joined(separator: ",")
+      let editors: Int = all.compactMap { $0 as? NSTextView }.count
+      let tables: Int = all.compactMap { $0 as? NSTableView }.count
+      let overPalette: Bool =
+        self.paletteWindow.map { window.frame.intersects($0.frame) } ?? false
+      var lines: [String] = []
+      lines.append("opened \(window.isVisible ? 1 : 0)")
+      lines.append("tabs " + tabs.joined(separator: ","))
+      lines.append("shortcut-buttons \(shortcutButtons.count)")
+      lines.append("buttons \(buttons.count)")
+      lines.append("titles " + buttonTitles)
+      lines.append("shortcut-titles " + shortcutTitles)
+      lines.append("text-views \(editors)")
+      lines.append("tables \(tables)")
+      lines.append("level \(window.level.rawValue)")
+      lines.append("palette-level \(self.paletteWindow?.level.rawValue ?? 0)")
+      lines.append("over-palette \(overPalette ? 1 : 0)")
       if let view = window.contentView,
          let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -360,8 +434,16 @@ extension Overlay {
           try? png.write(to: URL(fileURLWithPath: self.session + "/settings.png"))
         }
       }
-      lines.append("rows-outside "
-                   + "\((window.contentView?.subviews.filter { !window.contentView!.bounds.contains($0.frame) }.count) ?? -1)")
+      // Asked of each page, because a row laid out past the bottom of a tab is
+      // a row nobody can reach and the content view knows nothing about it.
+      var outside = 0
+      for page in (window.contentView?.subviews.compactMap { $0 as? NSTabView } ?? []) {
+        for item in page.tabViewItems {
+          guard let view = item.view else { continue }
+          outside += view.subviews.filter { !view.bounds.contains($0.frame) }.count
+        }
+      }
+      lines.append("rows-outside \(outside)")
       try? (lines.joined(separator: "\n") + "\n")
         .write(toFile: self.session + "/settings.probe", atomically: true,
                encoding: .utf8)

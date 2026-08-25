@@ -4,11 +4,42 @@ import Cocoa
 extension Overlay {
   func startVoice() {
     guard Settings.shared.voiceEnabled else { return }
+    #if RF_PROBES
+    // Asking for Speech Recognition puts a system dialog on the screen of
+    // whoever is running the tests, and it stays there until somebody answers
+    // it. A case that is about the settings and not about listening must not be
+    // able to do that.
+    let environment = ProcessInfo.processInfo.environment
+    if environment["RF_OVERLAY_SELFTEST"] != nil, environment["RF_VOICE_LISTEN"] != "1" {
+      warn("voice control is configured but the probe build is not listening.")
+      return
+    }
+    #endif
     let listener = VoiceListener(session: session, grammar: Settings.shared.grammar(),
                                  startedAt: startedAt)
     listener.delegate = self
     voice = listener
     listener.start()
+  }
+
+  // Turning voice control on or off, or changing what can be said, takes effect
+  // in the session that is running. A setting that only applies to the next
+  // session is one a user changes, tests, finds dead, and gives up on.
+  func voiceSettingChanged() {
+    let wanted = Settings.shared.voiceEnabled
+    if !wanted {
+      voice?.stop()
+      voice = nil
+      voiceFailure = nil
+      paletteView?.needsDisplay = true
+      return
+    }
+    // Already listening, so only the grammar changed and the listener is
+    // rebuilt around the new one.
+    voice?.stop()
+    voice = nil
+    voiceFailure = nil
+    startVoice()
   }
 
   // The commands are written down whether or not the transcript ends up being
