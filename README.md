@@ -77,12 +77,14 @@ overlay. `doctor` checks every dependency, the model, the microphone and
 the screen recording permission, and tells you what to click if something
 is missing.
 
-Two things macOS will ask for the first time, both for your terminal
+Things macOS will ask for the first time, all of them for your terminal
 application and not for this tool:
 
 - **Microphone.** The prompt appears when `doctor` or `start` records.
 - **Screen Recording**, in System Settings, Privacy and Security. Without
   it your screenshots contain the wallpaper and none of your windows.
+- **Speech Recognition**, only if you turn voice control on, at the start
+  of the first session that listens. Nothing listens until you answer it.
 
 One thing macOS will not ask for. If your screenshots land in `~/Desktop`
 or `~/Documents`, macOS blocks the terminal from reading them and no
@@ -135,12 +137,75 @@ taken, and stop.
 The marks are on the screen, so they are inside the image. A region
 capture crops the same marks.
 
+### Is it hearing you
+
+Next to the clock there is a five bar meter, lit from the recording
+itself and not from a second look at the microphone. It is there because
+a session that records silence looks exactly like one that records
+speech until you stop and find an empty document.
+
+If the input goes dead the row turns red and says NO SOUND, and so does
+the menu bar item. The recording keeps going, so fixing the input and
+carrying on costs you only what you said while it was red. `start`
+refuses outright rather than beginning a session on a dead microphone,
+and `recordfeedback status` prints the level of a session in progress.
+
+The usual cause is not a permission. An avfoundation device index is not
+stable across reboots or plugged in devices, so if you have virtual
+audio devices installed, a mixer routed to nothing can take the index
+your microphone had. `recordfeedback devices` lists them and
+`--device N` picks one.
+
+### Talking to it instead of reaching for a key
+
+Voice control is off until you turn it on, with `recordfeedback start
+--voice` or the Voice tab in the settings window. Then:
+
+```
+let's draw                              let's pick red
+let's pick arrow                        let's make it bigger
+let's take a screenshot                 let's clear
+let's take a screenshot of this area    let's undo
+let's stop the session                  let's done
+```
+
+Every command starts with `let's`, because a session is mostly sentences
+like "the rectangle in the corner is the wrong colour" and without a
+first word that sentence would change the tool twice. To say one of
+these and mean the words, put `not a command` in front of it:
+
+```
+not a command, let's take a screenshot of this area
+```
+
+That lands in the transcript and does nothing. Both words are settings,
+so if `let's` collides with how you talk, change it.
+
+The phrases are yours to edit. The Voice tab lists every command with
+its phrases, one per line, and any line reaches the command, so add the
+way you would actually say it.
+
+Spoken commands do not appear in the transcript. They were carried out
+while you were talking, and leaving them in would ask Claude Code to
+carry them out again. They are listed under their own heading in
+`feedback.md` instead, so you can still see what the tool did.
+
+Recognition runs on your Mac and the audio does not leave it. macOS asks
+for Speech Recognition at the start of the first session that listens,
+and **nothing is listening until you answer that prompt**; the palette
+says so if it could not start. macOS words that prompt as though speech
+will be sent to Apple. That is its generic wording, not what this asks
+for: recordfeedback sets on-device recognition and refuses to run at all
+on a machine that has no offline recogniser rather than uploading your
+session.
+
 ## The CLI
 
 The slash command drives this, and you can too.
 
 ```
 recordfeedback start [--note TEXT] [--device N] [--no-overlay]
+                     [--voice | --no-voice]
                 begin a session: record audio and arm the overlay
 recordfeedback wait [--timeout SECONDS]
                 block until the stop hotkey, the recorder dying, or a timeout

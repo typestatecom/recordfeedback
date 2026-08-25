@@ -55,6 +55,7 @@ and never parse stdout.
   overlay/Overlay+*.swift    the controller by section
   overlay/main.swift         the entry point, which Swift allows nowhere else
   overlay/build.sh         swiftc invocation, --probes for the test build
+  overlay/Info.plist       linked into the binary, so macOS can be asked for Speech Recognition
   commands/recordfeedback.md   the Claude Code slash command
   install.sh               symlinks the CLI and the slash command
   test/run.sh              the whole test suite, no framework
@@ -72,6 +73,8 @@ State and output live outside the repository:
     meta.json              device, start time, cwd, git branch, note
     start.ref stop.ref     empty files, the time window for screenshots
     audio.wav              16 kHz mono PCM
+    levels/0.pcm           one second of the recording each, six of them, rotated
+    commands.json          the spoken commands, when voice control is on
     ffmpeg.pid ffmpeg.log
     overlay.pid
     stop                   created by the stop hotkey, watched by `wait`
@@ -119,8 +122,59 @@ session you want back a week later is worth more than the megabytes.
    sign that audio is arriving. If the pid dies or no audio arrives,
    print the last 20 lines of `ffmpeg.log` and the microphone hint
    below, remove the session, and exit non-zero.
-5. Start `bin/rf-overlay` detached unless `--no-overlay`, store its pid.
-6. Print the hotkeys and the session path.
+5. Prove the input carries sound and not only samples. A recorder that
+   runs while every sample it captures is zero looks exactly like a
+   working session, and the whole session is lost with nothing on the
+   screen having said so. Wait for two finished level segments, up to
+   four seconds, and refuse the session if the loudest of them is at or
+   below `DEAD_DBFS`. Refuse here and never mid session: refusing now
+   costs the seconds spent proving it, and refusing later would throw
+   away what the user has already said.
+6. Start `bin/rf-overlay` detached unless `--no-overlay`, store its pid.
+   Pass `RF_DEAD_DBFS`, so the number that refuses a session here and the
+   number the palette raises its alarm on cannot drift apart.
+7. Print the hotkeys and the session path, and what can be said when
+   voice control is on.
+
+`--voice` and `--no-voice` write `voice.enabled` in the settings file
+rather than holding a flag for one session, so the flag and the settings
+window cannot disagree about whether the session that is running is
+listening.
+
+### The input level
+
+The recorder has a second output, so that whether it is hearing anything
+can be answered while it runs:
+
+```
+-ac 1 -ar 16000 -c:a pcm_s16le \
+-f segment -segment_time 1 -segment_wrap 6 -segment_format s16le \
+"$SESSION/levels/%d.pcm"
+```
+
+It has to be a second output. `audio.wav` is unreadable while the
+session runs: the wav muxer holds every sample until ffmpeg exits and
+the file is still zero bytes minutes in, with or without
+`-flush_packets`. ffmpeg's `astats` filter cannot supply it either,
+because `ametadata=print:file=` writes through avio and only flushes on
+close, and `pipe:1` and `/dev/stderr` behave the same. The segment muxer
+closes each file when its second ends, and a closed file is a flushed
+one. `-segment_wrap` bounds the cost at six files, about 190 kB,
+whatever the length of the session.
+
+The level is the loudest complete segment written in the last eight
+seconds, in dBFS, and the loudest rather than the latest because a
+person draws breath mid sentence. A segment older than eight seconds is
+ignored, since under `segment_wrap` files are overwritten in place and a
+recorder that died leaves loud ones behind. `DEAD_DBFS` is -85: a live
+microphone in a quiet room measured between -70 and -77 dBFS on this
+machine and a stream of zeros reads `-inf`, so the two are told apart
+with a wide margin and the number needs no tuning.
+
+`status` reports the level of a live session. `doctor` reports the level
+of half a second of real capture and fails on a device delivering
+silence, because counting the bytes that came back passes on a denied
+permission, a muted input and a virtual mixer routed to nothing alike.
 
 The microphone hint, printed verbatim on a recorder that produced no
 audio: the terminal application needs Microphone permission in System
@@ -264,8 +318,17 @@ single call over the whole folder so a file added and left out of the
 build cannot fail later at the first call into it:
 
 ```
-swiftc -O -framework Cocoa -framework Carbon -o bin/rf-overlay overlay/*.swift
+swiftc -O -framework Cocoa -framework Carbon -framework Speech \
+  -framework AVFoundation \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist \
+  -Xlinker overlay/Info.plist \
+  -o bin/rf-overlay overlay/*.swift
 ```
+
+The Info.plist is linked into the executable rather than put in a
+bundle, because this is one file and not an application. macOS kills a
+process that asks for Speech Recognition without one, so voice control
+cannot start at all without that section being present.
 
 `overlay/build.sh --probes` adds `-D RF_PROBES` and writes
 `bin/rf-overlay-probe`. That build carries the `RF_OVERLAY_SELFTEST`
@@ -412,6 +475,15 @@ a heads-up display that fades:
   was put for the next session.
 - A red dot and the elapsed time, which is the proof that recording is
   live. The dot pulses once a second.
+- An input meter beside the clock, five rising bars, lit from the level
+  of the recording itself. The clock proves the recorder is running and
+  says nothing about whether it can hear anything, and the difference
+  between those two is a whole lost session. After four seconds of
+  silence the row turns red, the meter pulses empty and it says NO
+  SOUND in words, and the menu bar item says it too. Four seconds,
+  because one lost second is a hiccup and a room with nobody talking in
+  it still sits far above the threshold, so a pause in the conversation
+  never reaches it. The session keeps recording throughout.
 - A row of tools: pen, arrow, rectangle, highlighter, text. Each button
   draws the mark its tool makes rather than the letter that reaches it,
   because five letters in a row read as one word and not as five
@@ -530,6 +602,67 @@ One known limit to write in the README: `⇧⌘4` then space captures a
 single window rather than a region, and a window capture excludes the
 overlay. Region and full screen capture include it.
 
+### Voice control
+
+Off until it is asked for, with `--voice` or the settings window. It
+needs a macOS permission of its own and a tool that starts listening for
+orders because it was installed is not one a person can predict.
+
+The audio comes from the recorder's own level segments, fed to
+`SFSpeechAudioBufferRecognitionRequest`, and never from a second capture
+of the microphone. Two consumers of one device is a thing that can half
+fail, and a recogniser hearing a stream the recording never got would
+act on words that are not in the transcript. It also means the overlay
+needs no Microphone permission of its own, that the recogniser and
+whisper are timestamped against the same clock, and that the whole path
+is drivable by a test through `RF_FFMPEG_INPUT` and `say`.
+
+`requiresOnDeviceRecognition` is set, and a machine with no offline
+recogniser for the locale is refused with an explanation rather than
+falling back to the network one. This tool records everything a person
+says while they work. macOS shows its own prompt saying speech data will
+be sent to Apple; that is the generic system wording and not what this
+tool asks for.
+
+Every command is prefixed by a trigger word, `let's` by default and
+configurable, because a session is mostly sentences like "the rectangle
+in the corner is the wrong colour" and matching bare phrases against
+that changes the tool twice in one sentence. Saying the escape phrase,
+`not a command` by default, in front of one makes it words: it swallows
+the trigger and the phrase behind it and both land in the transcript.
+Without that there is no way to tell this tool what to write down. An
+empty trigger is refused, since it would arm every phrase in the table
+on ordinary speech.
+
+Phrases are a list the user edits, several per command, and they are
+matched longest first so that "let's take a screenshot of this area"
+reaches the region capture and not the full screen one whose phrase is
+its first three words. The commands are `draw`, `done`, `clear`, `undo`,
+the five tools, the six colours, `bigger`, `smaller`, `screenshot`,
+`region`, `hide`, `show` and `stop`.
+
+A recogniser hands back the whole sentence again on every revision, so a
+command already acted on is remembered by where it sat in the utterance,
+and the same command does not fire twice within one and a half seconds.
+A spoken command produces no click and no keypress, so the row says what
+it heard for two and a half seconds afterwards, and says so in the
+palette when voice control was asked for and could not start.
+
+Each command is appended to `commands.json` in the session, with the
+offset it was spoken at, the command, and the words that reached it,
+written before it is acted on because `stop` ends the process. `stop`
+takes them back out of the transcript and lists them under `## Spoken
+commands` instead. They are instructions that were already carried out,
+and a reader who takes them for feedback acts on them a second time. The
+two recognisers do not agree word for word, so the phrase is found by
+overlap within a few seconds of where it was logged, and a command that
+cannot be found is reported as not having been removed rather than
+having the transcript cut at a guess.
+
+The settings window carries this on a tab of its own: the switch, the
+trigger word, the escape phrase, and every command's phrases one per
+line.
+
 ## The slash command
 
 `commands/recordfeedback.md`, symlinked to
@@ -577,10 +710,27 @@ Environment variables, all with working defaults:
 | `RF_SHOT_DIR` | `defaults read com.apple.screencapture location`, else `~/Desktop` | where to look for screenshots |
 | `RF_KEEP_SHOTS` | unset | leave the originals in the screenshot folder instead of moving them |
 | `RF_FFMPEG_INPUT` | unset | replaces the whole avfoundation input, for tests |
+| `RF_DEAD_DBFS` | `-85` | level at or below which the input counts as silence, passed to the overlay by `start` |
+| `RF_DEAD_SECONDS` | `4` | silence before the palette raises its alarm |
+| `RF_VOICE_LISTEN` | unset | in the probe build only, `1` lets a case start the recogniser. Without it a probe never asks for Speech Recognition, so the suite cannot put a system dialog on somebody's screen |
+
+The settings file `~/.recordfeedback/settings.json` carries the
+shortcuts and, under `voice`, `enabled`, `trigger`, `escape` and
+`phrases`. It is written out in full, defaults included, because it is
+where a person goes to see what they can say and a key that is not there
+is a sentence they never find out about.
 
 `RF_FFMPEG_INPUT` is what makes the pipeline testable without a
 microphone and without a person. A test sets it to a synthetic source
 and everything downstream runs unchanged.
+
+A session where nobody spoke is not the same fixture as a broken
+microphone, and `test/lib.sh` keeps them apart. `RF_ROOM_TONE` is white
+noise at about -71 dBFS, which is what this machine's microphone reads
+in a quiet room: quiet enough that `stop` calls the session silent, and
+alive enough that `start` does not read it as a dead input. `anullsrc`
+is the dead input. Spelling one with the other is how a lost session
+gets written off as a quiet one.
 
 ## Testing
 
@@ -625,6 +775,34 @@ The cases that must exist:
 8. The overlay pixel test above. It needs a real screen, so it must skip
    itself with a clear message when `screencapture` cannot run, and it
    must not be the reason `test/run.sh` fails in a headless run.
+9. `start` refuses an input that is delivering silence, says so in a way
+   that names the way out, and leaves no session behind, while a real
+   signal through the same path still starts. `anullsrc` is what a
+   denied microphone, a muted device and an unrouted virtual mixer all
+   look like on the wire.
+10. The palette raises its alarm on a dead input, says NO SOUND in
+    words, reaches the menu bar, and clears when the input comes back.
+    An alarm that latches is one the user learns to ignore.
+11. The grammar reads what a person says. The sentences that must reach
+    nothing matter more than the ones that must reach something: "the
+    rectangle in the corner is the wrong colour" and "I think the arrow
+    should be red here" are what a session is made of, and a trigger
+    with nothing known behind it is the user talking. "let's take a
+    screenshot of this area" reaches the region capture and not the full
+    screen one. The escape phrase holds. Two commands in one breath both
+    land.
+12. A spoken command comes out of the transcript and is listed on its
+    own, proven against a real whisper transcript of real spoken audio,
+    with the feedback either side of it surviving intact.
+13. A phrase typed into the settings window reaches the grammar that
+    matches speech, is written to the settings file, replaces rather
+    than joins the defaults, and does not flatten the shortcuts that
+    live in the same file. An empty trigger word is refused.
+
+A case must never put a macOS permission dialog on the screen of whoever
+is running the suite. The probe build refuses to start the recogniser
+unless `RF_VOICE_LISTEN=1`, so a case about the voice settings cannot
+ask for Speech Recognition.
 
 ## Build order
 

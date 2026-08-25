@@ -563,3 +563,82 @@ anywhere. The anchor now starts at `midX + paletteDrawingWidth / 2`, so
 the row it opens into is the one that is centred and the narrow row sits
 a little right of middle. The cost is that the idle row is off centre,
 which is the lesser of the two since it is the row nobody is looking at.
+
+## 2026-08-25 The input level is measured on the recorder's own second output
+
+A session that records silence looks exactly like one that records
+speech, and the only sign is a document with nothing in it, produced
+after the user has finished talking. The level had to be measurable
+while the session ran.
+
+`audio.wav` cannot supply it. The wav muxer holds every sample until
+ffmpeg exits and the file is still zero bytes minutes in, with or
+without `-flush_packets`, which was measured before anything was built
+on it. Neither can ffmpeg's `astats` filter: `ametadata=print:file=`
+writes through avio and only flushes on close, and `pipe:1` and
+`/dev/stderr` behave the same way, all three measured.
+
+So the recorder has a second output, the segment muxer writing one
+second of raw s16le per file with `-segment_wrap 6`. The segment muxer
+closes each file when the segment ends, and a closed file is a flushed
+one. It is the only thing ffmpeg can be made to write that is readable
+while it runs. The cost is a second encode of the same stream and about
+190 kB on disk, fixed whatever the length of the session. The gain is
+that the level, and the audio voice control listens to, both come from
+the stream that will actually be transcribed rather than from a second
+capture that can be healthy while the recording is dead.
+
+The threshold is -85 dBFS. A live microphone in a quiet room measured
+between -70 and -77 dBFS on this machine and a stream of zeros reads
+-inf, so the gap is wide enough that the number needs no tuning.
+
+## 2026-08-25 start refuses a dead input, and a live session only warns
+
+Refusing at start costs the user the two seconds spent proving the input
+is alive. Refusing mid session would throw away everything they have
+already said. So the same fact is answered two ways: `start` exits
+non-zero and removes the session, and a microphone that dies later turns
+the palette red and says so in the menu bar while the recorder keeps
+running, so a user who fixes the input carries on with what they had.
+
+## 2026-08-25 Voice control listens to the recording, not to the microphone
+
+The obvious build opens the microphone a second time with AVAudioEngine.
+That is rejected: two consumers of one device is a thing that can half
+fail, and a recogniser hearing a stream the recording never got would
+act on words that are not in the transcript. It reads the recorder's
+segment files instead and feeds them to
+`SFSpeechAudioBufferRecognitionRequest`.
+
+Three things fall out of that. The overlay needs no Microphone
+permission of its own. The recogniser and whisper are timestamped
+against the same clock, which is what lets a spoken command be found and
+cut out of the transcript afterwards. And the whole path is drivable by
+a test through `RF_FFMPEG_INPUT` and `say`, without a microphone and
+without a person.
+
+`requiresOnDeviceRecognition` is set and a machine without an offline
+recogniser is refused with an explanation rather than fallen back to the
+network one. This tool records everything a person says while they work,
+and uploading that to be told whether they said "let's draw" is not a
+trade its user agreed to. Note that macOS shows its own permission
+prompt saying speech data will be sent to Apple: that is the generic
+system wording and does not describe what this tool asks for.
+
+## 2026-08-25 A trigger word, and an escape for meaning the words
+
+A session is mostly a person describing their own software, in sentences
+like "the rectangle in the corner is the wrong colour". Matching bare
+phrases against that changes the tool twice in one sentence, so every
+command is prefixed, "let's" by default and configurable.
+
+The trigger alone is not enough, because the sentences a person says
+about this tool are exactly the sentences that drive it. So "not a
+command" in front of one makes it words: it swallows the trigger and the
+phrase behind it, and both land in the transcript. Without that there is
+no way to tell this tool what to write down.
+
+Phrases are a list the user edits, several per command, because one
+phrasing is the author's and a person mid sentence uses their own. An
+empty trigger is refused when it is set, since it would arm every phrase
+in the table on ordinary speech.
