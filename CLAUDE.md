@@ -1,16 +1,15 @@
 # recordfeedback
 
-A macOS tool that records what you say and what you draw on the screen
-during a working session, and hands Claude Code one document that joins
-the two. Read SPEC.md first. It is the contract and it holds every fact
-about this machine that was already checked, so that none of it is
-guessed again.
+A macOS tool that records what you say and what you draw on the screen during
+a working session, and hands a coding agent one document that joins the two.
+Read SPEC.md first. It is the contract and it holds every fact about this
+machine that was already checked, so that none of it is guessed again.
 
 ## Commands
 
 - Tests: `test/run.sh`
 - Build the overlay: `overlay/build.sh`
-- Install the CLI and the slash command: `./install.sh`
+- Install the CLI and agent integrations: `./install.sh`
 - Check the machine: `bin/recordfeedback doctor`
 
 ## How to work here

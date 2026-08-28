@@ -1,5 +1,5 @@
-# wait is what lets one slash command cover a session of any length: Claude
-# Code blocks on it, and the exit code says why it came back.
+# wait is what lets one agent invocation cover a session of any length: the
+# agent blocks on it, and the exit code says why it came back.
 . "$REPO/test/lib.sh"
 
 export RF_FFMPEG_INPUT="-re $RF_ROOM_TONE -t 600"

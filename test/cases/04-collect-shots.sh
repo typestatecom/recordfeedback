@@ -63,7 +63,7 @@ assert_eq "$(jq -r '.[2].offset_ms' "$session/shots.json")" "92000" "third offse
 assert_eq "$(jq -r '.[0].elapsed' "$session/shots.json")" "00:43" "first elapsed"
 assert_eq "$(jq -r '.[1].elapsed' "$session/shots.json")" "01:10" "second elapsed"
 
-# Claude Code reads an image by path from an unknown working directory, so
+# A coding agent reads an image by path from an unknown working directory, so
 # every path in shots.json has to be absolute.
 jq -r '.[].path' "$session/shots.json" | while read -r p; do
   case "$p" in

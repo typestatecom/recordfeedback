@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# recordfeedback: record spoken feedback with screen annotations, then hand
-# Claude Code one document that joins the words to the pictures.
+# recordfeedback: record spoken feedback with screen annotations, then hand a
+# coding agent one document that joins the words to the pictures.
 set -euo pipefail
 
 RF_HOME="${RF_HOME:-$HOME/.recordfeedback}"
@@ -48,9 +48,9 @@ die() {
   exit 1
 }
 
-DESKTOP_HINT='Open System Settings, Privacy and Security, Files and Folders, find the terminal application Claude Code runs in, and turn on Desktop Folder. Full Disk Access for the same application works too. macOS asks once and remembers a refusal.'
+DESKTOP_HINT='Open System Settings, Privacy and Security, Files and Folders, find the terminal application your coding agent runs in, and turn on Desktop Folder. Full Disk Access for the same application works too. macOS asks once and remembers a refusal.'
 
-SCREEN_HINT='Open System Settings, Privacy and Security, Screen and System Audio Recording, turn on the terminal application Claude Code runs in, and quit and reopen it. macOS does not apply the change to a running process.'
+SCREEN_HINT='Open System Settings, Privacy and Security, Screen and System Audio Recording, turn on the terminal application your coding agent runs in, and quit and reopen it. macOS does not apply the change to a running process.'
 
 MIC_HINT='the terminal application needs Microphone permission in System Settings, Privacy and Security, Microphone. macOS asks once, and if the prompt was refused the switch has to be turned on by hand.'
 
@@ -1064,9 +1064,9 @@ transcript_words() {
 
 # ------------------------------------------------------------------------ wait
 
-# One slash command has to cover a session of any length, and a Claude Code
-# tool call cannot run longer than 600 seconds. So wait comes back with a
-# timeout that means nothing is wrong and the caller simply calls it again.
+# One agent invocation has to cover a session of any length, and tool calls
+# have finite timeouts. So wait comes back with a timeout that means nothing
+# is wrong and the caller simply calls it again.
 cmd_wait() {
   local timeout=570
   while [ $# -gt 0 ]; do
@@ -1180,7 +1180,7 @@ segments = [] if silent else [s for s in transcript.get("transcription", [])
 
 # The sentences the user spoke at this tool rather than about their work. They
 # were acted on while the session ran, and leaving them in the document asks
-# Claude Code to act on them a second time as though they were feedback.
+# the coding agent to act on them a second time as though they were feedback.
 commands = load("commands.json", [])
 # The parse is guarded above and the shape is guarded here. This document is
 # written even when the transcription failed, so it must not be the thing that
@@ -1422,8 +1422,8 @@ audio_dbfs() {
 # ------------------------------------------------------------------------ stop
 
 # Idempotent, because a person who presses the stop hotkey and then runs the
-# slash command calls this twice, and because the expensive steps must not be
-# repeated or undone the second time.
+# agent integration calls this twice, and because the expensive steps must not
+# be repeated or undone the second time.
 cmd_stop() {
   local session="${1:-}"
   if [ -z "$session" ]; then

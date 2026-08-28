@@ -1,14 +1,14 @@
 # recordfeedback
 
-Talk to Claude Code instead of typing at it, and point at the screen
-while you talk.
+Talk to Claude Code or Codex instead of typing, and point at the screen while
+you talk.
 
-You type `/recordfeedback` in any Claude Code session. Recording starts.
-You keep using your computer and you say what you want. You draw arrows,
-boxes and highlights straight on the screen, and you press a key to
-capture. When you press stop, Claude Code wakes up holding one document:
-the transcript, the screenshots in the order you took them, and the
-sentence you were saying when each one was taken. Then it starts working.
+You type `/recordfeedback` in Claude Code or invoke `$recordfeedback` in
+Codex. Recording starts. You keep using your computer and you say what you
+want. You draw arrows, boxes and highlights straight on the screen, and you
+press a key to capture. When you press stop, the coding agent wakes up holding
+one document: the transcript, the screenshots in the order you took them, and
+the sentence you were saying when each one was taken. Then it starts working.
 
 The value is the join. Typing feedback is slower than saying it, and a
 screenshot without the sentence that goes with it is a puzzle.
@@ -72,10 +72,12 @@ recordfeedback doctor
 ```
 
 `install.sh` symlinks the CLI into `~/.local/bin` as `recordfeedback` and
-`rfb`, puts the slash command in `~/.claude/commands/`, and builds the
-overlay. `doctor` checks every dependency, the model, the microphone and
-the screen recording permission, and tells you what to click if something
-is missing.
+`rfb`, puts the Claude Code command in `~/.claude/commands/`, puts the Codex
+skill in `~/.agents/skills/`, and builds the overlay. `doctor` checks every
+dependency, the model, the microphone and the screen recording permission,
+and tells you what to click if something is missing. Codex detects installed
+skills automatically. If an already open Codex session does not show it,
+restart Codex.
 
 Things macOS will ask for the first time, all of them for your terminal
 application and not for this tool:
@@ -101,8 +103,12 @@ silent.
 
 ## Daily use
 
-Type `/recordfeedback` in Claude Code and talk. The keys it prints are
-the ones actually bound, since you can rebind all of them:
+Type `/recordfeedback` in Claude Code or `$recordfeedback` in Codex and talk.
+The keys it prints are the ones actually bound, since you can rebind all of
+them:
+
+Interrupting the agent turn leaves the recording running. Finish it with
+`/recordfeedback stop` in Claude Code or `$recordfeedback stop` in Codex.
 
 | Key | |
 | --- | --- |
@@ -208,10 +214,10 @@ aloud, or explain this tool to someone. It is the same switch the Voice
 tab shows, so turning it off leaves it off for the next session too, and
 the same key turns it back on.
 
-Spoken commands do not appear in the transcript. They were carried out
-while you were talking, and leaving them in would ask Claude Code to
-carry them out again. They are listed under their own heading in
-`feedback.md` instead, so you can still see what the tool did.
+Spoken commands do not appear in the transcript. They were carried out while
+you were talking, and leaving them in would ask the coding agent to carry them
+out again. They are listed under their own heading in `feedback.md` instead,
+so you can still see what the tool did.
 
 Recognition runs on your Mac and the audio does not leave it. macOS asks
 for Speech Recognition at the start of the first session that listens,
@@ -224,7 +230,7 @@ session.
 
 ## The CLI
 
-The slash command drives this, and you can too.
+The Claude Code command or Codex skill drives this, and you can too.
 
 ```
 recordfeedback start [--note TEXT] [--device N] [--no-overlay]

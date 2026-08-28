@@ -1,15 +1,15 @@
 # recordfeedback
 
 A macOS tool that turns a spoken, annotated working session into one
-structured feedback document that Claude Code acts on.
+structured feedback document that a coding agent acts on.
 
-You type `/recordfeedback` in any Claude Code session. Recording starts.
-You keep using your computer and you talk. You draw arrows, boxes and
-highlights straight on the screen, and you take screenshots with the
-normal macOS keys, so the annotations are inside the images. You press a
-stop key. Claude Code wakes up holding the transcript, the screenshots in
-the order you took them, and the sentence you were saying when each one
-was taken, and it starts working.
+You type `/recordfeedback` in Claude Code or invoke `$recordfeedback` in
+Codex. Recording starts. You keep using your computer and you talk. You draw
+arrows, boxes and highlights straight on the screen, and you take screenshots
+with the normal macOS keys, so the annotations are inside the images. You
+press a stop key. The coding agent wakes up holding the transcript, the
+screenshots in the order you took them, and the sentence you were saying when
+each one was taken, and it starts working.
 
 ## Why it exists
 
@@ -34,7 +34,7 @@ Do not re-derive these. They were checked on 2026-08-24.
 | avfoundation audio inputs | Several, index `0` the built-in microphone. `recordfeedback devices` lists them, and `--device N` picks one. The indexes are per machine, so nothing may assume them. |
 | Screenshot folder | `~/Screenshots`, set with `defaults write com.apple.screencapture location`. It was `~/Desktop`, which is a folder macOS protects. |
 | Protected folder access | **Not granted, and no longer needed.** `ls ~/Desktop` and `ls ~/Documents` both fail with `Operation not permitted`, so screenshots were moved out of the protected folders instead of asking for the permission. `~/Screenshots` and `~/Pictures` read fine. `doctor` still checks the folder by listing it, because `-d` succeeds on a folder macOS will not let it read, and a person who points the setting back at the Desktop needs to be told why nothing is collected. |
-| `~/.claude/commands/` | does not exist yet. `install.sh` creates it. No global slash command competes with this one. |
+| Agent integrations | `install.sh` creates the Claude Code command under `~/.claude/commands/` and the Codex skill under `~/.agents/skills/`. |
 
 `whisper-cli` writes ggml and Metal loader lines to stderr before any
 result. The first run of a process loads the embedded Metal library and
@@ -46,6 +46,7 @@ and never parse stdout.
 ```
 ~/Projects/recordfeedback/
   SPEC.md                  this file, the contract
+  AGENTS.md                points Codex at the repository rules
   CLAUDE.md                how to work in this repository
   README.md                install and daily use, written last
   bin/recordfeedback       the CLI, bash
@@ -57,7 +58,8 @@ and never parse stdout.
   overlay/build.sh         swiftc invocation, --probes for the test build
   overlay/Info.plist       linked into the binary, so macOS can be asked for Speech Recognition
   commands/recordfeedback.md   the Claude Code slash command
-  install.sh               symlinks the CLI and the slash command
+  skills/recordfeedback/SKILL.md  the Codex skill
+  install.sh               symlinks the CLI and both agent integrations
   test/run.sh              the whole test suite, no framework
   test/cases/*.sh          one file per case
   docs/decisions.md        engineering calls worth keeping
@@ -82,7 +84,7 @@ State and output live outside the repository:
     shots.json             one record per screenshot
     transcript.json        raw whisper-cli output
     transcript.txt         plain text, no timestamps
-    feedback.md            the document Claude Code reads
+    feedback.md            the document the coding agent reads
 ```
 
 A session directory is never deleted by the tool. Disk is cheap and a
@@ -92,7 +94,7 @@ session you want back a week later is worth more than the megabytes.
 
 `bin/recordfeedback <command>`. Also installed as `rfb`.
 
-### `start [--note TEXT] [--device N] [--no-overlay]`
+### `start [--note TEXT] [--device N] [--no-overlay] [--voice|--no-voice]`
 
 1. Refuse if `~/.recordfeedback/current` points at a session whose
    ffmpeg is alive. Print the session path and how long it has run.
@@ -188,8 +190,8 @@ prompt was refused the switch has to be turned on by hand.
 
 Blocks until `$SESSION/stop` appears, or the recorder dies, or the
 timeout passes. Exit code says which: `0` stop requested, `2` timeout,
-`3` recorder died. Poll every 500 ms. This is what lets one slash
-command cover the whole session, because Claude Code can call it again
+`3` recorder died. Poll every 500 ms. This is what lets one agent invocation
+cover the whole session, because the coding agent can call it again
 after a timeout and lose nothing.
 
 ### `stop`
@@ -318,7 +320,7 @@ Rules for the merge:
   words, and stamp the paragraph with the offset of its first segment.
   Whisper segments are a few seconds each and one line per segment is
   unreadable.
-- Image paths are absolute. Claude Code reads an image by path and a
+- Image paths are absolute. A coding agent reads an image by path and a
   relative path from an unknown working directory does not resolve.
 - The "taken while saying" line quotes at most 25 words.
 - No audio and no speech is not a failure. Write the screenshots with
@@ -701,39 +703,48 @@ nobody can find to turn on, and it is lit only when a listener is
 actually running, so a recogniser that failed to start does not show as
 listening.
 
-## The slash command
+## Agent integrations
 
 `commands/recordfeedback.md`, symlinked to
-`~/.claude/commands/recordfeedback.md` by `install.sh`.
+`~/.claude/commands/recordfeedback.md` by `install.sh`, is the Claude Code
+slash command.
 
 ```markdown
 ---
 description: Record spoken feedback with screen annotations, then act on it
-argument-hint: [stop|status|abort|doctor]
+argument-hint: [stop|status|abort|doctor|voice on|voice off]
 allowed-tools: Bash, Read
 ---
 ```
 
-The body tells Claude what to do with `$ARGUMENTS`:
+`skills/recordfeedback/SKILL.md`, symlinked as a directory to
+`~/.agents/skills/recordfeedback`, is the Codex skill. It has Agent Skills
+frontmatter with the name `recordfeedback` and a description that covers
+starting, stopping, inspecting and aborting a session. Codex invokes it as
+`$recordfeedback` and reads the mode from the rest of the prompt.
+
+Both integrations tell the coding agent to do the same work:
 
 - Empty. Run `recordfeedback start`. Print the hotkeys to the user in
   three lines or fewer. Then call `recordfeedback wait --timeout 570`
   in a loop until it exits 0 or 3, so a session of any length is
   covered. Then run `recordfeedback stop`, read the `feedback.md` path
   from its last line, read that file, read every screenshot it names
-  with the Read tool, restate the feedback as a short list, and start
+  with its image viewing tool, restate the feedback as a short list, and start
   the work.
 - `stop`. Only the stop and process half, for a session the user ended
   by interrupting the turn.
+- `voice on`, `voice off`. Start the next session with voice control enabled
+  or disabled.
 - `status`, `abort`, `doctor`. Run the CLI and print the output.
 
-The Bash timeout for `wait` is 570 seconds and the tool ceiling is 600.
-Do not raise it.
+The Claude Code Bash timeout for `wait` is 570 seconds and its tool ceiling is
+600. Codex also runs `wait` in a finite tool call and continues polling the
+same process when the shell yields.
 
-While `wait` blocks, the user cannot type in Claude Code. That is
-intended, they are talking, not typing. Control-C interrupts the turn
-and leaves the recorder running, and `/recordfeedback stop` picks it up.
-Say this in the README.
+While `wait` blocks, the user is talking rather than typing. Interrupting the
+turn leaves the recorder running. `/recordfeedback stop` in Claude Code or
+`$recordfeedback stop` in Codex picks it up.
 
 ## Configuration
 
@@ -753,6 +764,11 @@ Environment variables, all with working defaults:
 | `RF_VOICE_LISTEN` | unset | in the probe build only, `1` lets a case start the recogniser. Without it a probe never spawns whisper for audio it has no use for |
 | `RF_NO_SCREEN` | unset | `1` skips the cases that put windows on the screen, so the suite can be run on a machine somebody is working at |
 | `RF_WHISPER` | `whisper-cli` on the usual paths | the binary voice control listens with |
+
+The installer also accepts `RF_BIN_DIR`, `RF_COMMANDS_DIR` and
+`RF_SKILLS_DIR` to override its CLI, Claude Code command and Codex skill
+destinations. The defaults are `~/.local/bin`, `~/.claude/commands` and
+`~/.agents/skills`.
 
 The settings file `~/.recordfeedback/settings.json` carries the
 shortcuts and, under `voice`, `enabled`, `trigger`, `escape` and
@@ -876,7 +892,7 @@ one before the previous one is proven by something that runs.
 7. The overlay: window, draw mode, pen, then arrow, rectangle,
    highlighter, colours, undo, clear, the HUD. Case 8 as early as the
    first pen stroke exists, because it decides the design.
-8. The slash command and `install.sh`.
+8. The Claude Code command, Codex skill and `install.sh`.
 9. `README.md` and `docs/decisions.md`.
 10. A real session, by hand, start to finish, with the user.
 
@@ -886,6 +902,6 @@ that the overlay being hard does not block the rest.
 ## Out of scope
 
 No cloud speech service. No video capture. No editing the transcript
-before Claude sees it. No menu bar application. No Xcode project. No
+before the coding agent sees it. No menu bar application. No Xcode project. No
 Homebrew formula. These are all reasonable later and none of them is
 needed to answer the question this tool exists for.

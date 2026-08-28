@@ -720,3 +720,12 @@ second, and a resolution that silently falls back when Apple renames a
 device between the two lists. The check that the input carries sound is
 what catches it when the fallback is wrong, so the two together fail
 loudly rather than quietly.
+
+## 2026-08-28 Each coding agent gets its native integration
+
+Claude Code keeps its slash command under `~/.claude/commands`, and Codex gets
+an Agent Skill under `~/.agents/skills`. `install.sh` symlinks both to the
+repository, so updates take effect without another copy step. A single prompt
+file cannot serve both because Claude Code and Codex use different frontmatter,
+invocation and image tools. The cost is keeping two short workflow files in
+sync.

@@ -1,7 +1,7 @@
 # A spoken command is an instruction to this tool, not feedback about the work.
 # It was carried out while the session ran, so leaving it in the document asks
-# Claude Code to carry it out a second time. It comes out of the transcript and
-# is reported on its own.
+# the coding agent to carry it out a second time. It comes out of the transcript
+# and is reported on its own.
 #
 # The speech is real, the transcript is real whisper, and the scrubber is the
 # one that ships. What is stood in for is Apple's recogniser, which needs a

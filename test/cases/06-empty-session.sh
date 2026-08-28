@@ -50,7 +50,7 @@ echo "--- summary ---"; echo "$summary"
 assert_contains "$summary" "0 words" "the summary of a session nobody spoke in"
 
 # stop is idempotent, and it is called twice whenever a person uses the hotkey
-# and then the slash command.
+# and then the agent integration.
 out2="$("$RFB" stop "$session")"
 echo "--- second stop ---"; echo "$out2"
 assert_eq "$(echo "$out2" | tail -1)" "$session/feedback.md" "the last line of the second stop"

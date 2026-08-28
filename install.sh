@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
-# Puts the CLI on PATH and the slash command where Claude Code looks for it.
+# Puts the CLI on PATH and the agent commands where their hosts look for them.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="${RF_BIN_DIR:-$HOME/.local/bin}"
 COMMANDS_DIR="${RF_COMMANDS_DIR:-$HOME/.claude/commands}"
+SKILLS_DIR="${RF_SKILLS_DIR:-$HOME/.agents/skills}"
 
-mkdir -p "$BIN_DIR" "$COMMANDS_DIR"
+mkdir -p "$BIN_DIR" "$COMMANDS_DIR" "$SKILLS_DIR"
 
 ln -sfn "$REPO/bin/recordfeedback" "$BIN_DIR/recordfeedback"
 ln -sfn "$REPO/bin/recordfeedback" "$BIN_DIR/rfb"
 ln -sfn "$REPO/commands/recordfeedback.md" "$COMMANDS_DIR/recordfeedback.md"
+ln -sfn "$REPO/skills/recordfeedback" "$SKILLS_DIR/recordfeedback"
 
 echo "Installed:"
 echo "  $BIN_DIR/recordfeedback"
 echo "  $BIN_DIR/rfb"
 echo "  $COMMANDS_DIR/recordfeedback.md"
+echo "  $SKILLS_DIR/recordfeedback"
 
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
   *)
     echo
-    echo "$BIN_DIR is not on your PATH, so the slash command cannot find the CLI."
+    echo "$BIN_DIR is not on your PATH, so the agent integrations cannot find the CLI."
     echo "Add this to ~/.zshrc and open a new terminal:"
     echo "  export PATH=\"$BIN_DIR:\$PATH\""
     ;;

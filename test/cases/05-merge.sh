@@ -47,7 +47,7 @@ assert_contains "$doc" "branch \`main\`" "the summary line"
 assert_contains "$doc" "## Transcript" "the document"
 assert_contains "$doc" "## Screenshots" "the document"
 
-# Claude Code reads an image by path from an unknown working directory.
+# A coding agent reads an image by path from an unknown working directory.
 assert_contains "$doc" "($session/shots/01-0043.png)" "the image link"
 assert_not_contains "$doc" "](shots/" "the image link"
 
